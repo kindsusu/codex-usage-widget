@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.basedpyright/
+build/
+dist/
+*.egg-info/
+widget_config.json
+.artifacts/
+screenshots/

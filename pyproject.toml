@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-usage-widget"
+version = "0.1.0"
+description = "A compact Windows desktop widget for Codex rate-limit usage"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Pillow>=10.0",
+    "pystray>=0.19.5",
+]
+
+[project.scripts]
+codex-usage-widget = "codex_usage_widget.app:main"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.31",
+    "pytest>=8.0",
+    "ruff>=0.12",
+]
+
+[tool.basedpyright]
+typeCheckingMode = "all"
+pythonVersion = "3.11"
+pythonPlatform = "All"
+include = ["codex_usage_widget", "tests"]
+exclude = ["**/__pycache__", "**/.venv", "**/build", "**/dist"]
+reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedVariable = "error"
+reportMissingParameterType = "error"
+reportPrivateUsage = "error"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+src = ["codex_usage_widget", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM812", "ISC001", "D203", "D213", "CPY001", "FBT001", "FBT002", "FBT003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",
+    "ARG",
+    "PLR2004",
+    "SLF001",
+    "D",
+    "A001",
+    "I001",
+    "INP001",
+    "PLR0402",
+    "SLOT000",
+]
+"tests/test_config.py" = ["S603"]
+"codex_usage_widget/parser.py" = ["A001", "D107", "RET504"]
+"codex_usage_widget/windows.py" = ["PLR2004"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-config", "--strict-markers"]
