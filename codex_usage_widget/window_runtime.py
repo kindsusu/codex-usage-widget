@@ -8,7 +8,7 @@ import os
 from ctypes import wintypes
 from dataclasses import dataclass
 from pathlib import PureWindowsPath
-from typing import TYPE_CHECKING, ClassVar, Final, Protocol, final
+from typing import TYPE_CHECKING, ClassVar, Final, Literal, Protocol, final
 
 from codex_usage_widget.windows import (
     MonitorRect,
@@ -143,6 +143,19 @@ def is_codex_foreground(
     )
 
 
+def is_codex_running(records: tuple[ProcessRecord, ...]) -> bool:
+    """Return whether a supported Codex executable exists in a process table."""
+    return any(_normalized_name(row.name) in _DIRECT_CODEX_NAMES for row in records)
+
+
+def window_layer(
+    smart_enabled: bool,
+    codex_running: bool,
+) -> Literal["top", "bottom"]:
+    """Map the live Codex process state to the widget's native window layer."""
+    return "top" if smart_enabled and codex_running else "bottom"
+
+
 def should_keep_topmost(
     smart_enabled: bool,
     *,
@@ -180,6 +193,16 @@ def read_foreground_process() -> ForegroundProcess:
         return read_foreground_process_native()
     except (AttributeError, OSError, TypeError, ValueError):
         return ForegroundProcess(name=None, related_process_names=())
+
+
+def read_codex_running() -> bool:
+    """Read global Codex process presence without exposing Win32 failures."""
+    if os.name != "nt":
+        return False
+    try:
+        return is_codex_running(_read_process_records())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
 
 
 def read_foreground_process_native() -> ForegroundProcess:

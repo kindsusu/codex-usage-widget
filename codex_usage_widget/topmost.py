@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, final
+from typing import TYPE_CHECKING, Literal, Protocol, final
 
 from codex_usage_widget.window_runtime import (
     read_foreground_process,
@@ -44,27 +44,24 @@ class SmartTopmostController:
         self._smart_enabled = smart_enabled
         self._set_topmost = set_topmost
         self._timer: str | None = None
-        self._suspended = False
 
     def apply(self) -> None:
         """Apply the current foreground-sensitive topmost decision once."""
-        if self._suspended or self._root.grab_current() is not None:
+        if self._root.grab_current() is not None:
             return
-        keep_top = should_keep_topmost(
+        keep = should_keep_topmost(
             self._smart_enabled(),
             widget_focused=self._root.focus_get() is not None,
             foreground=read_foreground_process(),
         )
-        self._set_zorder(keep_top)
+        self._set_zorder("top" if keep else "bottom")
 
     def suspend(self) -> None:
         """Lower the widget while a popup menu owns the foreground."""
-        self._suspended = True
-        self._set_zorder(False)
+        self._set_zorder("bottom")
 
     def resume(self) -> None:
         """Resume foreground-sensitive topmost behavior after a popup closes."""
-        self._suspended = False
         self.apply()
 
     def start(self) -> None:
@@ -78,9 +75,9 @@ class SmartTopmostController:
             self._root.after_cancel(self._timer)
             self._timer = None
 
-    def _set_zorder(self, keep_top: bool) -> None:
-        _ = self._set_topmost(keep_top)
-        _ = set_window_zorder(self._root.winfo_id(), "top" if keep_top else "normal")
+    def _set_zorder(self, layer: Literal["top", "bottom"]) -> None:
+        _ = self._set_topmost(layer == "top")
+        _ = set_window_zorder(self._root.winfo_id(), layer)
 
     def _tick(self) -> None:
         self.apply()

@@ -41,6 +41,9 @@ _SINGLETON_NAME: Final = "codex-usage-widget-singleton"
 _MIN_VISIBLE_AREA: Final = 800
 _ERROR_ALREADY_EXISTS: Final = 183
 _FALSE: Final = 0
+_GA_ROOT: Final = 2
+_SWP_ZORDER_FLAGS: Final = 0x13
+_SWP_FRAME_CHANGED_FLAGS: Final = 0x37
 _singleton_handles: Final[list[int]] = []
 
 
@@ -67,6 +70,11 @@ class _CloseHandleFunction:
 @dataclass(frozen=True, slots=True)
 class _SetWindowPosFunction:
     call: Callable[[int, int, int, int, int, int, int], int]
+
+
+@dataclass(frozen=True, slots=True)
+class _GetAncestorFunction:
+    call: Callable[[int, int], int | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,6 +188,12 @@ def set_window_zorder(hwnd: int, mode: Literal["top", "normal", "bottom"]) -> bo
     targets: Final = {"top": -1, "normal": -2, "bottom": 1}
     try:
         user32 = ctypes.CDLL("user32", use_last_error=True)
+        user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        user32.GetAncestor.restype = ctypes.c_void_p
+        get_ancestor = _GetAncestorFunction(call=user32.GetAncestor)
+        root = get_ancestor.call(hwnd, _GA_ROOT)
+        if not root:
+            return False
         user32.SetWindowPos.argtypes = [
             ctypes.c_void_p,
             ctypes.c_void_p,
@@ -191,7 +205,17 @@ def set_window_zorder(hwnd: int, mode: Literal["top", "normal", "bottom"]) -> bo
         ]
         user32.SetWindowPos.restype = ctypes.c_int
         set_window_pos = _SetWindowPosFunction(call=user32.SetWindowPos)
-        return bool(set_window_pos.call(hwnd, targets[mode], 0, 0, 0, 0, 0x13))
+        return bool(
+            set_window_pos.call(
+                int(root),
+                targets[mode],
+                0,
+                0,
+                0,
+                0,
+                _SWP_ZORDER_FLAGS,
+            ),
+        )
     except (AttributeError, OSError):
         return False
 
@@ -202,6 +226,13 @@ def hide_from_taskbar(hwnd: int) -> bool:
         return False
     try:
         user32 = ctypes.CDLL("user32", use_last_error=True)
+        user32.GetAncestor.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        user32.GetAncestor.restype = ctypes.c_void_p
+        get_ancestor = _GetAncestorFunction(call=user32.GetAncestor)
+        root = get_ancestor.call(hwnd, _GA_ROOT)
+        if not root:
+            return False
+        root_number = int(root)
         if ctypes.sizeof(ctypes.c_void_p) == 8:
             get_raw = user32.GetWindowLongPtrW
             set_raw = user32.SetWindowLongPtrW
@@ -215,18 +246,38 @@ def hide_from_taskbar(hwnd: int) -> bool:
         get_window_long = _GetWindowLongFunction(call=get_raw)
         set_window_long = _SetWindowLongFunction(call=set_raw)
         _ = ctypes.set_last_error(0)
-        style = get_window_long.call(hwnd, -20)
+        style = get_window_long.call(root_number, -20)
         if style == 0 and ctypes.get_last_error() != 0:
             return False
         new_style = (style & ~0x00040000) | 0x00000080
         _ = ctypes.set_last_error(0)
-        previous_style = set_window_long.call(hwnd, -20, new_style)
+        previous_style = set_window_long.call(root_number, -20, new_style)
         if previous_style == 0 and ctypes.get_last_error() != 0:
             return False
+        user32.SetWindowPos.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.SetWindowPos.restype = ctypes.c_int
+        set_window_pos = _SetWindowPosFunction(call=user32.SetWindowPos)
+        return bool(
+            set_window_pos.call(
+                root_number,
+                0,
+                0,
+                0,
+                0,
+                0,
+                _SWP_FRAME_CHANGED_FLAGS,
+            ),
+        )
     except (AttributeError, OSError, TypeError, ValueError):
         return False
-    else:
-        return True
 
 
 def _visible_area(

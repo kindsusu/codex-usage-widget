@@ -25,6 +25,7 @@ from codex_usage_widget.window_runtime import (
     resolve_initial_position,
 )
 from codex_usage_widget.window_surface import apply_window_surface
+from codex_usage_widget.window_visibility import apply_native_window_state
 
 if TYPE_CHECKING:
     from codex_usage_widget.config import WidgetConfig
@@ -61,6 +62,7 @@ class WidgetApplication:
         self._prepare_root()
         self._view = self._new_view()
         self._render()
+        apply_native_window_state(self._root, self._topmost.apply)
         _ = self._service.request_refresh()
         _ = root.after(100, self._poll)
         _ = root.after(self._config.refresh_seconds * 1000, self._periodic_refresh)
@@ -83,8 +85,6 @@ class WidgetApplication:
         _ = self._root.bind("<B1-Motion>", self._drag_move)
         _ = self._root.bind("<ButtonRelease-1>", self._drag_end)
         _ = self._root.protocol("WM_DELETE_WINDOW", self.shutdown)
-        _ = windows.hide_from_taskbar(self._root.winfo_id())
-        self._topmost.apply()
 
     def _new_view(self) -> WidgetView:
         actions = ViewActions(
@@ -138,7 +138,7 @@ class WidgetApplication:
         match signal:  # noqa: RUF100  # noqa: MATCH_OK
             case "show":
                 self._root.deiconify()
-                self._root.lift()
+                apply_native_window_state(self._root, self._topmost.apply)
             case "exit":
                 self.shutdown()
                 return
