@@ -106,7 +106,7 @@ def test_failure_body_is_actionable_and_footer_is_not_a_duplicate() -> None:
     footer = footer_text(None, state)
 
     assert body == "Codex에 로그인한 뒤 다시 시도하세요."
-    assert footer == "Ctrl+R로 다시 시도"
+    assert footer == "우클릭하여 새로고침"
     assert body != footer
 
 
@@ -122,7 +122,7 @@ def test_stale_footer_includes_last_success_time_and_retry_hint() -> None:
 
     footer = footer_text(None, state)
 
-    assert footer == "마지막 확인 14:34 · Ctrl+R로 다시 시도"
+    assert footer == "마지막 확인 14:34 · 우클릭하여 새로고침"
 
 
 def test_opacity_slider_maps_track_positions_to_supported_range() -> None:
@@ -131,17 +131,76 @@ def test_opacity_slider_maps_track_positions_to_supported_range() -> None:
     assert opacity_from_position(160, 140) == 1.0
 
 
-def test_mini_battery_clamps_fill_and_keeps_percentage_legible() -> None:
+def test_mini_battery_remaining_and_percentage_text_stay_legible() -> None:
     tokens = theme_tokens(ThemeName.DARK)
 
+    # Remaining is the clamped inverse of used capacity.
     assert mini_view.mini_remaining_percent(-8.0) == 100.0
     assert mini_view.mini_remaining_percent(25.0) == 75.0
     assert mini_view.mini_remaining_percent(120.0) == 0.0
-    assert mini_view.mini_battery_fill_width(-8.0, 70) == 0.0
-    assert mini_view.mini_battery_fill_width(50.0, 70) == 35.0
-    assert mini_view.mini_battery_fill_width(120.0, 70) == 70.0
+    # Centered text flips to the on-fill color once the fill covers the middle.
     assert mini_view.mini_battery_text_color(49.0, tokens) == tokens.text_primary
     assert mini_view.mini_battery_text_color(50.0, tokens) == tokens.meter_text_on_fill
+
+
+def test_mini_battery_fill_pixels_floors_a_visible_sliver() -> None:
+    # inner_width = body_width(48) - 2 * inset(3) = 42
+    assert mini_view.mini_battery_fill_pixels(0.0, 42) == 0
+    assert mini_view.mini_battery_fill_pixels(-8.0, 42) == 0
+    assert mini_view.mini_battery_fill_pixels(50.0, 42) == 21
+    assert mini_view.mini_battery_fill_pixels(120.0, 42) == 42
+    # A near-empty charge still renders the minimum-visible floor.
+    assert mini_view.mini_battery_fill_pixels(1.0, 42) == 3
+
+
+def test_mini_battery_fill_turns_red_at_low_remaining() -> None:
+    tokens = theme_tokens(ThemeName.DARK)
+    session = tokens.mini_session_fill
+    low = tokens.mini_low_fill
+
+    assert mini_view.mini_battery_fill_color(20.1, session, low) == session
+    assert mini_view.mini_battery_fill_color(20.0, session, low) == low
+    assert mini_view.mini_battery_fill_color(0.0, session, low) == low
+
+
+def test_mini_battery_style_maps_session_and_weekly_windows() -> None:
+    dark = theme_tokens(ThemeName.DARK)
+    light = theme_tokens(ThemeName.LIGHT)
+
+    session = mini_view.mini_battery_style(300, dark)
+    weekly = mini_view.mini_battery_style(10_080, dark)
+
+    assert session.label == "S"
+    assert session.base_fill == dark.mini_session_fill
+    assert session.label_color == dark.mini_session_label
+    assert weekly.label == "W"
+    assert weekly.base_fill == dark.mini_weekly_fill
+    assert weekly.label_color == dark.mini_weekly_label
+    # Label glyph tone is theme-specific for legibility on each backdrop.
+    assert mini_view.mini_battery_style(300, light).label_color == "#10a37f"
+    assert mini_view.mini_battery_style(10_080, light).label_color == "#0e7490"
+
+
+def test_mini_fill_box_keeps_equal_top_and_bottom_insets() -> None:
+    body_x, body_y, body_height, inset = 20, 10, 20, 3
+
+    box = mini_view.mini_fill_box(body_x, body_y, body_height, inset, fill_pixels=24)
+
+    top_inset = box.top - body_y
+    bottom_inset = (body_y + body_height) - (box.bottom - 1)
+    assert top_inset == inset
+    assert bottom_inset == inset
+    assert top_inset == bottom_inset
+    assert box.right - box.left == 24 + 1
+
+
+def test_mini_label_image_is_hard_edged_with_binary_alpha() -> None:
+    image = mini_view.render_label_image("W", "#8ad3e6", 12)
+
+    alpha_values = set(image.getchannel("A").tobytes())
+    assert image.mode == "RGBA"
+    assert alpha_values <= {0, 255}
+    assert 255 in alpha_values
 
 
 def test_mini_codex_icons_have_no_tile_background() -> None:

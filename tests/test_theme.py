@@ -22,12 +22,20 @@ def test_theme_tokens_match_the_design_contract() -> None:
     assert dark_tokens.control_icon_size == 14
     assert light_tokens.mini_icon_asset == "codex-color.png"
     assert dark_tokens.mini_icon_asset == "codex-color-dark.png"
-    assert dark_tokens.mini_icon_size == 14
-    assert dark_tokens.mini_gap == 5
-    assert dark_tokens.mini_label_width == 14
-    assert dark_tokens.mini_background_key == "#ff00ff"
-    assert dark_tokens.mini_battery_width == 76
-    assert dark_tokens.mini_battery_height == 14
+    assert light_tokens.mini_background_key == "#fdfdfb"
+    assert dark_tokens.mini_background_key == "#fdfdfb"
+    assert dark_tokens.mini_battery_width == 48
+    assert dark_tokens.mini_battery_height == 20
+    assert dark_tokens.mini_group_pitch == 74
+    assert dark_tokens.mini_height == 40
+    # Codex-brand battery palette: shared fills, theme-specific label glyphs.
+    assert light_tokens.mini_session_fill == "#7fd8bb"
+    assert light_tokens.mini_weekly_fill == "#8ad3e6"
+    assert light_tokens.mini_low_fill == "#f38ba8"
+    assert light_tokens.mini_session_label == "#10a37f"
+    assert light_tokens.mini_weekly_label == "#0e7490"
+    assert dark_tokens.mini_session_label == "#7fd8bb"
+    assert dark_tokens.mini_weekly_label == "#8ad3e6"
 
 
 def test_meter_color_uses_the_semantic_boundary_colors() -> None:

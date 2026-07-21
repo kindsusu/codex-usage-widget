@@ -119,69 +119,93 @@ def test_smart_topmost_controller_cancels_its_timer_on_stop(
     assert root.cancelled == ["timer-1"]
 
 
-def test_smart_topmost_does_not_raise_parent_while_context_menu_is_open(
+def _record_layers(
+    monkeypatch: pytest.MonkeyPatch, layers: list[str]
+) -> None:
+    def record_layer(_hwnd: int, layer: Literal["top", "bottom"]) -> bool:
+        layers.append(layer)
+        return True
+
+    monkeypatch.setattr(
+        "codex_usage_widget.topmost.set_window_zorder",
+        record_layer,
+    )
+
+
+def test_smart_topmost_only_touches_win32_on_a_layer_transition(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Given
+    # Given the foreground never changes, so every poll wants the same layer.
     root = _TopmostRoot()
+    layers: list[str] = []
     monkeypatch.setattr(
         "codex_usage_widget.topmost.read_foreground_process",
         _codex_foreground,
     )
+    _record_layers(monkeypatch, layers)
+    controller = SmartTopmostController(root, lambda: True, root.set_topmost)
+
+    # When
+    controller.apply()  # unknown -> top: one transition
+    controller.apply()  # top -> top: no-op
+    controller.apply()  # top -> top: no-op
+
+    # Then a steady poll never re-asserts TOPMOST (the old over-the-menu bug).
+    assert root.topmost_values == [True]
+    assert layers == ["top"]
+
+
+def test_smart_topmost_does_not_reassert_while_a_tk_grab_is_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given
+    root = _TopmostRoot()
+    layers: list[str] = []
+    monkeypatch.setattr(
+        "codex_usage_widget.topmost.read_foreground_process",
+        _codex_foreground,
+    )
+    _record_layers(monkeypatch, layers)
     controller = SmartTopmostController(root, lambda: True, root.set_topmost)
     controller.apply()
 
     # When
     root.grabbed = root
-    controller.apply()
+    controller.apply()  # grab held -> early return
     root.grabbed = None
-    controller.apply()
+    controller.apply()  # top already cached -> no-op
 
     # Then
+    assert root.topmost_values == [True]
+    assert layers == ["top"]
+
+
+def test_smart_topmost_freezes_in_place_while_a_menu_is_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Given a native menu is open: it holds NO Tk grab (grab_current stays None)
+    # yet the 750 ms poll still fires inside tk_popup's modal loop.
+    root = _TopmostRoot()
+    layers: list[str] = []
+    monkeypatch.setattr(
+        "codex_usage_widget.topmost.read_foreground_process",
+        _codex_foreground,
+    )
+    _record_layers(monkeypatch, layers)
+    controller = SmartTopmostController(root, lambda: True, root.set_topmost)
+    controller.apply()  # -> top
+
+    # When
+    controller.suspend()  # menu opened: freeze in place, never lower
+    controller.apply()  # poll during the menu
+    controller.apply()  # ...every tick
+    frozen_topmost = list(root.topmost_values)
+    frozen_layers = list(layers)
+    controller.resume()  # menu closed: reassert once to correct any drift
+
+    # Then suspend and the polls touch Win32 zero times (widget never moves);
+    # resume performs exactly one reassert of the same (top) layer.
+    assert frozen_topmost == [True]
+    assert frozen_layers == ["top"]
     assert root.topmost_values == [True, True]
-
-
-def test_smart_topmost_lowers_parent_until_context_menu_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Given
-    root = _TopmostRoot()
-    monkeypatch.setattr(
-        "codex_usage_widget.topmost.read_foreground_process",
-        _codex_foreground,
-    )
-    controller = SmartTopmostController(root, lambda: True, root.set_topmost)
-    controller.apply()
-    root.grabbed = root
-
-    # When
-    controller.suspend()
-    controller.apply()
-    root.grabbed = None
-    controller.resume()
-
-    # Then
-    assert root.topmost_values == [True, False, True]
-
-
-def test_smart_topmost_recovers_when_menu_close_callback_is_missed(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Given
-    root = _TopmostRoot()
-    monkeypatch.setattr(
-        "codex_usage_widget.topmost.read_foreground_process",
-        _codex_foreground,
-    )
-    controller = SmartTopmostController(root, lambda: True, root.set_topmost)
-    controller.apply()
-    root.grabbed = root
-    controller.suspend()
-    controller.apply()
-
-    # When
-    root.grabbed = None
-    controller.apply()
-
-    # Then
-    assert root.topmost_values == [True, False, True]
+    assert layers == ["top", "top"]

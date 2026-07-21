@@ -77,10 +77,6 @@ class WidgetApplication:
         self._root.update_idletasks()
         position = resolve_initial_position(self._config.position, self._root)
         _ = self._root.geometry(format_window_position(position.x, position.y))
-        _ = self._root.bind("<Control-r>", self._refresh_event)
-        _ = self._root.bind("<Control-m>", self._mini_event)
-        _ = self._root.bind("<Control-t>", self._theme_event)
-        _ = self._root.bind("<Escape>", self._hide_event)
         _ = self._root.bind("<ButtonPress-1>", self._drag_start)
         _ = self._root.bind("<B1-Motion>", self._drag_move)
         _ = self._root.bind("<ButtonRelease-1>", self._drag_end)
@@ -256,18 +252,6 @@ class WidgetApplication:
             self._config,
             windows.WindowPosition(self._root.winfo_x(), self._root.winfo_y()),
         )
-
-    def _refresh_event(self, _event: tk.Event[tk.Misc]) -> None:
-        self.refresh()
-
-    def _mini_event(self, _event: tk.Event[tk.Misc]) -> None:
-        self._toggle_mini()
-
-    def _theme_event(self, _event: tk.Event[tk.Misc]) -> None:
-        self._toggle_theme()
-
-    def _hide_event(self, _event: tk.Event[tk.Misc]) -> None:
-        self.hide()
 
 
 def run_widget() -> int:

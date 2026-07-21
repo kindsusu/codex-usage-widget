@@ -16,7 +16,7 @@ from codex_usage_widget.assets import (
 
 
 EXPECTED_MANIFEST_SHA256 = (
-    "d8c00f1ee4953daca8073c9885e584395f1248e0bf691f796eea6d3f2ee57b89"
+    "297d1ce24279aaf53faf52774cc4b8714b84038e31639ffb8a92136148439ab3"
 )
 
 
@@ -35,10 +35,11 @@ def test_pet_manifest_preserves_all_named_assets_in_deterministic_order() -> Non
     filenames = tuple(asset.filename for asset in PET_ASSETS)
 
     # Then
-    assert len(names) == 31
+    assert len(names) == 30
+    assert "claudecode" not in names  # retired Claude Code mascot
     assert names == tuple(sorted(names))
-    assert len(set(names)) == 31
-    assert len(set(filenames)) == 31
+    assert len(set(names)) == 30
+    assert len(set(filenames)) == 30
     assert all(re.fullmatch(r"[a-z0-9-]+\.png", name) for name in filenames)
 
 

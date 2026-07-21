@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import tempfile
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -140,9 +141,17 @@ def load_config(path: Path) -> WidgetConfig:
 
 
 def select_initial_config(config: WidgetConfig) -> tuple[WidgetConfig, bool]:
-    """Choose the stable first pet and report whether persistence is required."""
-    changed = config.pet is None
-    return (replace(config, pet=PET_NAMES[0]) if changed else config), changed
+    """Assign a random pet when unset and report whether persistence is required.
+
+    Configs whose pet is no longer in the pool -- notably the retired
+    ``claudecode`` mascot, which loads back as ``None`` -- are treated as unset
+    and rerolled to a random remaining pet so the new choice is persisted.
+    """
+    changed = config.pet not in PET_NAMES
+    if not changed:
+        return config, False
+    # Cosmetic mascot pick only -- no security relevance to the randomness.
+    return replace(config, pet=random.choice(PET_NAMES)), True  # noqa: S311
 
 
 def save_config(path: Path, config: WidgetConfig) -> None:

@@ -24,7 +24,6 @@ class PetAsset:
 PET_ASSETS: Final = tuple(
     PetAsset(name, filename)
     for name, filename in (
-        ("claudecode", "claudecode.png"),
         ("image (1)", "image-1.png"),
         ("image (10)", "image-10.png"),
         ("image (11)", "image-11.png"),

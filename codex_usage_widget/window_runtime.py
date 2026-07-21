@@ -44,6 +44,11 @@ _DIRECT_CODEX_NAMES: Final = frozenset(
 _TERMINAL_NAMES: Final = frozenset(
     {"windowsterminal.exe", "powershell.exe", "pwsh.exe", "cmd.exe", "conhost.exe"},
 )
+# Executables that HOST a Codex process without being Codex themselves. A
+# terminal hosts the Codex CLI; the ChatGPT desktop app launches Codex as a
+# child (codex.exe <- ChatGPT.exe), so its foreground window must count as
+# Codex whenever a direct Codex executable is one of its descendants.
+_CODEX_HOST_NAMES: Final = _TERMINAL_NAMES | frozenset({"chatgpt.exe"})
 
 
 @final
@@ -134,11 +139,15 @@ def is_codex_foreground(
     foreground_process_name: str | None,
     related_process_names: tuple[str, ...],
 ) -> bool:
-    """Classify direct Codex windows or a terminal hosting a Codex process."""
+    """Classify direct Codex windows or a host running a Codex process.
+
+    A host is a terminal or the ChatGPT desktop app; its foreground window
+    counts as Codex only when a direct Codex executable is a descendant.
+    """
     foreground = _normalized_name(foreground_process_name)
     if foreground in _DIRECT_CODEX_NAMES:
         return True
-    return foreground in _TERMINAL_NAMES and any(
+    return foreground in _CODEX_HOST_NAMES and any(
         _normalized_name(name) in _DIRECT_CODEX_NAMES for name in related_process_names
     )
 

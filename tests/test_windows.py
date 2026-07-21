@@ -105,6 +105,23 @@ def test_terminal_foreground_requires_a_related_codex_process() -> None:
     assert is_codex_foreground(terminal, ("python.exe",)) is False
 
 
+def test_chatgpt_desktop_host_requires_a_related_codex_process() -> None:
+    # Given
+    chatgpt = "ChatGPT.exe"
+
+    # When / Then
+    assert is_codex_foreground(chatgpt, ("codex.exe",)) is True
+    assert is_codex_foreground(chatgpt, ("python.exe",)) is False
+
+
+def test_chatgpt_desktop_host_matches_a_full_executable_path() -> None:
+    # Given
+    chatgpt = r"C:\\Users\\User\\AppData\\Local\\Programs\\ChatGPT\\ChatGPT.exe"
+
+    # When / Then
+    assert is_codex_foreground(chatgpt, ("codex.exe",)) is True
+
+
 def test_foreground_context_includes_only_descendants_of_the_terminal() -> None:
     # Given
     records = (

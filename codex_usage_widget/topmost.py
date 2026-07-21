@@ -12,7 +12,6 @@ from codex_usage_widget.window_runtime import (
 from codex_usage_widget.windows import set_window_zorder
 
 if TYPE_CHECKING:
-    import tkinter as tk
     from collections.abc import Callable
 
     class _GrabOwner(Protocol): ...
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
         def after_cancel(self, id: str) -> None: ...  # noqa: A002
 
-        def focus_get(self) -> tk.Misc | None: ...
+        def focus_get(self) -> object | None: ...
 
         def grab_current(self) -> _GrabOwner | None: ...
 
@@ -44,10 +43,22 @@ class SmartTopmostController:
         self._smart_enabled = smart_enabled
         self._set_topmost = set_topmost
         self._timer: str | None = None
+        self._suspended = False
+        # Last layer actually pushed to Win32. None means "unknown", forcing the
+        # next apply() to reassert. SetWindowPos/-topmost only fire on a real
+        # transition, so a steady poll never re-asserts TOPMOST -- re-asserting
+        # is exactly what used to shove the widget above (then over) a menu.
+        self._current_layer: Literal["top", "bottom"] | None = None
 
     def apply(self) -> None:
         """Apply the current foreground-sensitive topmost decision once."""
-        if self._root.grab_current() is not None:
+        # While a popup menu is open the widget must be FROZEN: not re-raised
+        # (that flickered it over the menu) and not lowered (that hid it behind
+        # other windows). A native Windows menu registers no Tk grab and the
+        # 750 ms poll still fires inside tk_popup's modal loop, so the suspend
+        # flag -- not grab_current() -- is the reliable freeze; grab_current()
+        # still covers real Tk grabs.
+        if self._suspended or self._root.grab_current() is not None:
             return
         keep = should_keep_topmost(
             self._smart_enabled(),
@@ -57,11 +68,18 @@ class SmartTopmostController:
         self._set_zorder("top" if keep else "bottom")
 
     def suspend(self) -> None:
-        """Lower the widget while a popup menu owns the foreground."""
-        self._set_zorder("bottom")
+        """Freeze z-order while a popup menu is open, leaving the widget put.
+
+        The widget is NOT lowered: a native menu already renders above it, and
+        lowering would hide the widget behind other windows. Freezing apply()
+        stops the poll from re-asserting TOPMOST over the menu.
+        """
+        self._suspended = True
 
     def resume(self) -> None:
-        """Resume foreground-sensitive topmost behavior after a popup closes."""
+        """Unfreeze and force one reassert to correct any drift while frozen."""
+        self._suspended = False
+        self._current_layer = None
         self.apply()
 
     def start(self) -> None:
@@ -76,8 +94,13 @@ class SmartTopmostController:
             self._timer = None
 
     def _set_zorder(self, layer: Literal["top", "bottom"]) -> None:
+        # Only touch Win32 on a real layer transition (Claude-widget parity):
+        # a no-op poll must never call SetWindowPos, or it re-raises the widget.
+        if layer == self._current_layer:
+            return
         _ = self._set_topmost(layer == "top")
         _ = set_window_zorder(self._root.winfo_id(), layer)
+        self._current_layer = layer
 
     def _tick(self) -> None:
         self.apply()

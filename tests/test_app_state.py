@@ -71,7 +71,7 @@ def test_toggle_commands_when_invoked_flip_only_their_fields() -> None:
     assert topmost == replace(config, smart_topmost=False)
 
 
-def test_menu_model_when_built_exposes_keyboard_equivalent_core_actions() -> None:
+def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:
     # Given
     config = WidgetConfig(theme=ThemeName.DARK, smart_topmost=False)
 
@@ -88,6 +88,15 @@ def test_menu_model_when_built_exposes_keyboard_equivalent_core_actions() -> Non
         MenuCommand.HIDE,
         MenuCommand.EXIT,
     }
+    labels = {item.command: item.label for item in model}
+    assert labels[MenuCommand.REFRESH] == "새로고침"
+    assert labels[MenuCommand.THEME] == "다크/라이트 전환"
+    assert labels[MenuCommand.MINI] == "미니모드"
+    assert labels[MenuCommand.SMART_TOPMOST] == "스마트 위"
+    assert labels[MenuCommand.HIDE] == "트레이로 숨기기"
+    assert labels[MenuCommand.EXIT] == "종료"
+    # No accelerator/shortcut hints remain in any label.
+    assert all("Ctrl" not in item.label and "\t" not in item.label for item in model)
     assert next(item for item in model if item.command is MenuCommand.THEME).checked
     assert not next(
         item for item in model if item.command is MenuCommand.SMART_TOPMOST

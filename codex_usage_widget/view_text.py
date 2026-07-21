@@ -24,7 +24,7 @@ def footer_text(view_model: SnapshotViewModel | None, state: WidgetState) -> str
         return "잠시만 기다려 주세요"
     last_success = _last_success(state)
     if state.failure is not None:
-        retry = "Ctrl+R로 다시 시도"
+        retry = "우클릭하여 새로고침"
         return f"{last_success} · {retry}" if last_success else retry
     credit_text = "" if view_model is None else view_model.credits_text
     if state.status is RefreshStatus.REFRESHING:

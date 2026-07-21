@@ -39,7 +39,17 @@ class ThemeTokens:
     meter_text_on_fill: str = "#111827"
     mini_secondary: str = "#89b4fa"
     mini_icon_asset: str = "codex-color.png"
-    mini_background_key: str = "#ff00ff"
+    # Near-white transparent color key (LWA_COLORKEY) for the floating mini
+    # strip in BOTH themes: anti-aliased battery/text fringe blends toward
+    # white, staying invisible over light desktops instead of showing a halo.
+    mini_background_key: str = "#fdfdfb"
+    # Codex-brand battery palette. Fills are shared across themes; the floating
+    # S/W label glyphs get theme-specific tones for legibility on each backdrop.
+    mini_session_fill: str = "#7fd8bb"
+    mini_weekly_fill: str = "#8ad3e6"
+    mini_low_fill: str = "#f38ba8"
+    mini_session_label: str = "#10a37f"
+    mini_weekly_label: str = "#0e7490"
     font_family: str = "Segoe UI"
     space_1: int = 2
     space_2: int = 4
@@ -52,13 +62,20 @@ class ThemeTokens:
     pet_canvas_size: int = 24
     control_size: int = 20
     control_icon_size: int = 14
-    mini_icon_size: int = 14
-    mini_gap: int = 5
-    mini_label_width: int = 14
-    mini_width: int = 114
-    mini_height: int = 28
-    mini_battery_width: int = 76
-    mini_battery_height: int = 14
+    # iPhone-style mini battery geometry (base pixels; two groups pitched apart).
+    mini_first_body_x: int = 20
+    mini_group_pitch: int = 74
+    mini_battery_top: int = 10
+    mini_battery_width: int = 48
+    mini_battery_height: int = 20
+    mini_battery_corner_radius: int = 6
+    mini_battery_inset: int = 3
+    mini_nub_width: int = 4
+    mini_nub_height: int = 10
+    mini_label_gap: int = 5
+    mini_label_px: int = 12
+    mini_width: int = 156
+    mini_height: int = 40
     full_width: int = 276
 
 
@@ -96,6 +113,8 @@ _DARK: Final = ThemeTokens(
     tooltip_text="#181825",
     status_error="#ff9aae",
     mini_icon_asset="codex-color-dark.png",
+    mini_session_label="#7fd8bb",
+    mini_weekly_label="#8ad3e6",
 )
 _THEMES: Final[Mapping[ThemeName, ThemeTokens]] = MappingProxyType(
     {ThemeName.LIGHT: _LIGHT, ThemeName.DARK: _DARK},

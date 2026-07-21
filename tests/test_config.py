@@ -49,7 +49,7 @@ def test_load_config_returns_reference_defaults_when_file_is_missing(
     assert config == WidgetConfig()
 
 
-def test_select_initial_config_assigns_pet_only_when_missing() -> None:
+def test_select_initial_config_rerolls_a_random_pet_only_when_missing() -> None:
     # Given
     missing = WidgetConfig(pet=None)
     selected = WidgetConfig(pet="image (10)")
@@ -59,10 +59,32 @@ def test_select_initial_config_assigns_pet_only_when_missing() -> None:
     unchanged, selected_changed = select_initial_config(selected)
 
     # Then
-    assert initialized.pet == PET_NAMES[0]
+    assert initialized.pet in PET_NAMES
+    assert initialized.pet != "claudecode"
     assert missing_changed is True
     assert unchanged is selected
     assert selected_changed is False
+
+
+def test_load_migrates_retired_claudecode_pet_to_a_random_remaining_pet(
+    tmp_path: Path,
+) -> None:
+    # Given a legacy config still pinned to the retired Claude Code mascot
+    path = tmp_path / "widget_config.json"
+    _ = path.write_text(
+        json.dumps({"pet": "claudecode"}),
+        encoding="utf-8",
+    )
+
+    # When
+    loaded = load_config(path)
+    migrated, changed = select_initial_config(loaded)
+
+    # Then
+    assert loaded.pet is None  # claudecode is no longer a valid pool member
+    assert changed is True
+    assert migrated.pet in PET_NAMES
+    assert migrated.pet != "claudecode"
 
 
 def test_widget_config_rejects_out_of_range_values_without_echoing_them() -> None:
@@ -212,7 +234,7 @@ def test_save_config_uses_atomic_replace_and_only_safe_fields(
         scale=1.3,
         mini_mode=True,
         smart_topmost=False,
-        pet="claudecode",
+        pet="image (10)",
         refresh_seconds=300,
         position=WindowPosition(x=10, y=20),
     )

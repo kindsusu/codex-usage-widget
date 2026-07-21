@@ -113,10 +113,10 @@ class WidgetView:
         controls = tk.Frame(header, bg=tokens.surface_primary)
         _ = controls.pack(side="right")
         specs: tuple[tuple[IconName, Callable[[], None], str], ...] = (
-            ("theme", self._actions.theme, "라이트/다크 테마 (Ctrl+T)"),
+            ("theme", self._actions.theme, "다크/라이트 전환"),
             ("opacity", self._actions.opacity, "투명도 조절"),
-            ("mini", self._actions.mini, "미니 모드 (Ctrl+M)"),
-            ("close", self._actions.hide, "트레이로 숨기기 (Esc)"),
+            ("mini", self._actions.mini, "미니모드"),
+            ("close", self._actions.hide, "트레이로 숨기기"),
         )
         for icon, callback, tooltip in specs:
             button = VectorIconButton(controls, icon, callback, tooltip, tokens)

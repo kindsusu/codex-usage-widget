@@ -38,22 +38,22 @@ def show_context_menu(
     config: WidgetConfig,
     callbacks: MenuCallbacks,
 ) -> None:
-    """Show the complete keyboard-equivalent settings menu."""
+    """Show the complete mouse-driven settings menu."""
     tokens = theme_tokens(config.theme)
     menu = _new_menu(root, tokens)
-    _ = menu.add_command(label="지금 새로고침\tCtrl+R", command=callbacks.refresh)
+    _ = menu.add_command(label="새로고침", command=callbacks.refresh)
     _ = menu.add_checkbutton(
-        label="다크 테마\tCtrl+T",
+        label="다크/라이트 전환",
         command=callbacks.theme,
         variable=tk.BooleanVar(menu, value=config.theme is ThemeName.DARK),
     )
     _ = menu.add_checkbutton(
-        label="미니 모드\tCtrl+M",
+        label="미니모드",
         command=callbacks.mini,
         variable=tk.BooleanVar(menu, value=config.mini_mode),
     )
     _ = menu.add_checkbutton(
-        label="스마트 항상 위",
+        label="스마트 위",
         command=callbacks.topmost,
         variable=tk.BooleanVar(menu, value=config.smart_topmost),
     )
@@ -64,18 +64,16 @@ def show_context_menu(
         _ = pet_menu.add_command(label=name, command=_pet_command(callbacks.pet, name))
     _ = menu.add_cascade(label="펫 선택", menu=pet_menu)
     _ = menu.add_separator()
-    _ = menu.add_command(label="트레이로 숨기기\tEsc", command=callbacks.hide)
+    _ = menu.add_command(label="트레이로 숨기기", command=callbacks.hide)
     _ = menu.add_command(label="종료", command=callbacks.exit_app)
-    _ = menu.bind(
-        "<Unmap>",
-        lambda _event: root.after_idle(callbacks.menu_closed),
-    )
+    # tk_popup is modal on Windows: it blocks until the menu is dismissed by any
+    # route (selection, ESC, or click-away), so the finally is the one reliable
+    # place to resume topmost -- <Unmap> does not fire dependably on every close.
     callbacks.menu_opened()
     try:
         menu.tk_popup(x, y)
-    except tk.TclError:
+    finally:
         callbacks.menu_closed()
-        raise
 
 
 def show_opacity_popup(

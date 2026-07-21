@@ -8,7 +8,7 @@ from codex_usage_widget.config import ThemeName, WidgetConfig
 
 
 class MenuCommand(StrEnum):
-    """Commands available from the context menu and keyboard routes."""
+    """Commands available from the mouse-driven context menu."""
 
     REFRESH = "refresh"
     THEME = "theme"
@@ -63,16 +63,16 @@ def toggle_smart_topmost(config: WidgetConfig) -> WidgetConfig:
 def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
     """Build the menu's portable labels and checked states."""
     return (
-        MenuItemModel(MenuCommand.REFRESH, "지금 새로고침"),
+        MenuItemModel(MenuCommand.REFRESH, "새로고침"),
         MenuItemModel(
             MenuCommand.THEME,
-            "다크 테마",
+            "다크/라이트 전환",
             checked=config.theme is ThemeName.DARK,
         ),
-        MenuItemModel(MenuCommand.MINI, "미니 모드", checked=config.mini_mode),
+        MenuItemModel(MenuCommand.MINI, "미니모드", checked=config.mini_mode),
         MenuItemModel(
             MenuCommand.SMART_TOPMOST,
-            "스마트 항상 위",
+            "스마트 위",
             checked=config.smart_topmost,
         ),
         MenuItemModel(MenuCommand.HIDE, "트레이로 숨기기"),
