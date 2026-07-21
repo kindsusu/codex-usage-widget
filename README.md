@@ -47,6 +47,6 @@ python -m venv .venv
 
 ## 라이선스와 에셋
 
-펫 에셋은 사용자가 제공한 MIT 라이선스 프로젝트 [kindsusu/claude-usage-widget](https://github.com/kindsusu/claude-usage-widget)에서 가져왔습니다. 원본 프로젝트의 아이디어와 Windows 위젯 상호작용을 존중하면서 Codex의 동적 사용량 데이터 구조에 맞게 구현했습니다.
+펫 에셋은 같은 제작자의 MIT 프로젝트 [kindsusu/claude-usage-widget](https://github.com/kindsusu/claude-usage-widget)와 공유합니다.
 
 테마·투명도·미니 모드에는 `assets/icon`의 사용자 제공 SVG를 사용합니다. 각 SVG의 line 버전은 기본 상태, fill 버전은 hover·active 상태에 대응하며, Tk에서 그대로 표시할 수 있도록 같은 폴더의 투명 PNG로 변환합니다. 헤더 버튼 아이콘은 `Codex Plus` 10pt 제목 높이에 맞춘 14px로 표시하고 클릭 영역은 20px로 유지합니다. 트레이에는 `codex.svg`, 미니 모드에는 밝은 테마용 `codex-color.svg`와 파생된 어두운 테마용 `codex-color-dark.svg`를 사용합니다. SVG 원본은 편집 가능한 형태로 보존됩니다. 숨기기 아이콘의 fallback은 [Tabler Icons](https://github.com/tabler/tabler-icons)를 사용하며, 관련 MIT 고지는 `THIRD_PARTY_NOTICES.md`에 포함했습니다.
