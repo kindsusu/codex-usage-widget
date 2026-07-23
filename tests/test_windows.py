@@ -18,6 +18,7 @@ from codex_usage_widget.windows import (
     WindowPosition,
     WindowSize,
     resolve_window_position,
+    taskbar_hidden_exstyle,
 )
 
 
@@ -85,6 +86,25 @@ def test_initial_position_resolves_against_tk_virtual_desktop_bounds() -> None:
 
     # Then
     assert resolved == WindowPosition(x=-1820, y=100)
+
+
+def test_taskbar_hidden_exstyle_clears_appwindow_and_sets_toolwindow() -> None:
+    # Given
+    ws_ex_appwindow = 0x00040000
+    ws_ex_toolwindow = 0x00000080
+    ws_ex_topmost = 0x00000008
+    ws_ex_layered = 0x00080000  # set by -transparentcolor churn
+
+    # When: a window currently owning a taskbar button plus unrelated bits
+    result = taskbar_hidden_exstyle(ws_ex_appwindow | ws_ex_topmost | ws_ex_layered)
+
+    # Then: APPWINDOW dropped, TOOLWINDOW added, every other bit preserved
+    assert not result & ws_ex_appwindow
+    assert result & ws_ex_toolwindow
+    assert result & ws_ex_topmost
+    assert result & ws_ex_layered
+    # And the composition is idempotent across repeated attribute churn.
+    assert taskbar_hidden_exstyle(result) == result
 
 
 def test_codex_desktop_and_cli_are_direct_foreground_matches() -> None:

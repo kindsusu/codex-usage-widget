@@ -44,7 +44,19 @@ _FALSE: Final = 0
 _GA_ROOT: Final = 2
 _SWP_ZORDER_FLAGS: Final = 0x13
 _SWP_FRAME_CHANGED_FLAGS: Final = 0x37
+_GWL_EXSTYLE: Final = -20
+_WS_EX_TOOLWINDOW: Final = 0x00000080
+_WS_EX_APPWINDOW: Final = 0x00040000
 _singleton_handles: Final[list[int]] = []
+
+
+def taskbar_hidden_exstyle(exstyle: int) -> int:
+    """Compose the extended style that keeps a window off the taskbar.
+
+    Clears WS_EX_APPWINDOW and sets WS_EX_TOOLWINDOW while preserving every
+    other bit. Idempotent, so repeated calls after attribute churn are safe.
+    """
+    return (exstyle & ~_WS_EX_APPWINDOW) | _WS_EX_TOOLWINDOW
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,12 +258,12 @@ def hide_from_taskbar(hwnd: int) -> bool:
         get_window_long = _GetWindowLongFunction(call=get_raw)
         set_window_long = _SetWindowLongFunction(call=set_raw)
         _ = ctypes.set_last_error(0)
-        style = get_window_long.call(root_number, -20)
+        style = get_window_long.call(root_number, _GWL_EXSTYLE)
         if style == 0 and ctypes.get_last_error() != 0:
             return False
-        new_style = (style & ~0x00040000) | 0x00000080
+        new_style = taskbar_hidden_exstyle(style)
         _ = ctypes.set_last_error(0)
-        previous_style = set_window_long.call(root_number, -20, new_style)
+        previous_style = set_window_long.call(root_number, _GWL_EXSTYLE, new_style)
         if previous_style == 0 and ctypes.get_last_error() != 0:
             return False
         user32.SetWindowPos.argtypes = [

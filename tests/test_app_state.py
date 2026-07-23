@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import ThemeName, WidgetConfig
 from codex_usage_widget.app import (
@@ -101,3 +103,30 @@ def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:
     assert not next(
         item for item in model if item.command is MenuCommand.SMART_TOPMOST
     ).checked
+
+
+@pytest.mark.parametrize(
+    ("mini", "smart", "dark"),
+    [(True, True, True), (False, False, False)],
+)
+def test_menu_model_checked_flags_track_every_toggle(
+    mini: bool, smart: bool, dark: bool
+) -> None:
+    # Given
+    config = WidgetConfig(
+        theme=ThemeName.DARK if dark else ThemeName.LIGHT,
+        mini_mode=mini,
+        smart_topmost=smart,
+    )
+
+    # When
+    checked = {item.command: item.checked for item in build_menu_model(config)}
+
+    # Then each toggle row mirrors its live config field...
+    assert checked[MenuCommand.MINI] is mini
+    assert checked[MenuCommand.SMART_TOPMOST] is smart
+    assert checked[MenuCommand.THEME] is dark
+    # ...and the plain command rows are never checked.
+    assert checked[MenuCommand.REFRESH] is False
+    assert checked[MenuCommand.HIDE] is False
+    assert checked[MenuCommand.EXIT] is False

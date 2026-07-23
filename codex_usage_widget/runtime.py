@@ -65,8 +65,16 @@ class WidgetApplication:
         apply_native_window_state(self._root, self._topmost.apply)
         _ = self._service.request_refresh()
         _ = root.after(100, self._poll)
+        # Windows materializes the taskbar button a beat after the window maps,
+        # so reassert the tool-window style once the shell has caught up.
+        _ = root.after(200, self._reassert_no_taskbar)
         _ = root.after(self._config.refresh_seconds * 1000, self._periodic_refresh)
         self._topmost.start()
+
+    def _reassert_no_taskbar(self) -> None:
+        if self._closing:
+            return
+        _ = windows.hide_from_taskbar(self._root.winfo_id())
 
     def _prepare_root(self) -> None:
         tokens = theme_tokens(self._config.theme)
@@ -142,6 +150,7 @@ class WidgetApplication:
                 pass
         if not self._tray.available and self._root.state() == "withdrawn":
             self._root.deiconify()
+            _ = windows.hide_from_taskbar(self._root.winfo_id())
         _ = self._root.after(100, self._poll)
 
     def _periodic_refresh(self) -> None:
@@ -181,6 +190,9 @@ class WidgetApplication:
             * factor
         )
         _ = self._root.geometry(f"{width}x{height}")
+        # apply_window_surface churns -transparentcolor/-bg, which lets Windows
+        # re-add the taskbar button; strip it again after every (re)layout.
+        _ = windows.hide_from_taskbar(self._root.winfo_id())
 
     def _save_and_render(self, config: WidgetConfig, *, rebuild: bool = False) -> None:
         self._config = config

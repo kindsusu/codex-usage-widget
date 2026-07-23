@@ -41,21 +41,29 @@ def show_context_menu(
     """Show the complete mouse-driven settings menu."""
     tokens = theme_tokens(config.theme)
     menu = _new_menu(root, tokens)
+    # Rebuilt on every popup, so each variable snapshots the CURRENT config.
+    # These BooleanVars MUST stay referenced: an unreferenced tk.BooleanVar is
+    # garbage-collected immediately, which unsets its Tcl variable and makes the
+    # checkbutton render unchecked. Named locals stay alive across the modal
+    # tk_popup below, so the checkbuttons reflect live state while displayed.
+    theme_on = tk.BooleanVar(menu, value=config.theme is ThemeName.DARK)
+    mini_on = tk.BooleanVar(menu, value=config.mini_mode)
+    topmost_on = tk.BooleanVar(menu, value=config.smart_topmost)
     _ = menu.add_command(label="새로고침", command=callbacks.refresh)
     _ = menu.add_checkbutton(
         label="다크/라이트 전환",
         command=callbacks.theme,
-        variable=tk.BooleanVar(menu, value=config.theme is ThemeName.DARK),
+        variable=theme_on,
     )
     _ = menu.add_checkbutton(
         label="미니모드",
         command=callbacks.mini,
-        variable=tk.BooleanVar(menu, value=config.mini_mode),
+        variable=mini_on,
     )
     _ = menu.add_checkbutton(
         label="스마트 위",
         command=callbacks.topmost,
-        variable=tk.BooleanVar(menu, value=config.smart_topmost),
+        variable=topmost_on,
     )
     _add_scale_menu(menu, "전체 배율", False, callbacks.scale)
     _add_scale_menu(menu, "미니 배율", True, callbacks.scale)
