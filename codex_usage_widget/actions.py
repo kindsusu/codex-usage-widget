@@ -72,7 +72,7 @@ def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
         MenuItemModel(MenuCommand.MINI, "미니모드", checked=config.mini_mode),
         MenuItemModel(
             MenuCommand.SMART_TOPMOST,
-            "스마트 위",
+            "스마트 포지션 스위칭",
             checked=config.smart_topmost,
         ),
         MenuItemModel(MenuCommand.HIDE, "트레이로 숨기기"),

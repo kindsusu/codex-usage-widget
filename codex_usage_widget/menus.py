@@ -61,7 +61,7 @@ def show_context_menu(
         variable=mini_on,
     )
     _ = menu.add_checkbutton(
-        label="스마트 위",
+        label="스마트 포지션 스위칭",
         command=callbacks.topmost,
         variable=topmost_on,
     )

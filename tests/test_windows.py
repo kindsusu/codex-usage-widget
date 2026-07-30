@@ -11,6 +11,7 @@ from codex_usage_widget.window_runtime import (
     is_codex_running,
     read_codex_running,
     resolve_initial_position,
+    should_keep_topmost,
     window_layer,
 )
 from codex_usage_widget.windows import (
@@ -199,17 +200,40 @@ def test_codex_running_ignores_claude_and_unrelated_processes() -> None:
     [
         (True, True, "top"),
         (True, False, "bottom"),
-        (False, True, "bottom"),
-        (False, False, "bottom"),
+        (False, True, "top"),
+        (False, False, "top"),
     ],
 )
-def test_window_layer_tracks_codex_process_presence(
+def test_window_layer_tracks_codex_process_presence_only_while_smart(
     smart_enabled: bool,
     codex_running: bool,
     expected: str,
 ) -> None:
     # Given / When / Then
     assert window_layer(smart_enabled, codex_running) == expected
+
+
+@pytest.mark.parametrize(
+    ("widget_focused", "foreground"),
+    [
+        (False, ForegroundProcess(name="explorer.exe", related_process_names=())),
+        (False, ForegroundProcess(name="codex.exe", related_process_names=())),
+        (True, ForegroundProcess(name="explorer.exe", related_process_names=())),
+    ],
+)
+def test_should_keep_topmost_pins_the_widget_while_smart_is_disabled(
+    widget_focused: bool,
+    foreground: ForegroundProcess,
+) -> None:
+    # Given / When
+    keep = should_keep_topmost(
+        False,
+        widget_focused=widget_focused,
+        foreground=foreground,
+    )
+
+    # Then
+    assert keep is True
 
 
 def test_codex_running_reader_contains_native_snapshot_failures(

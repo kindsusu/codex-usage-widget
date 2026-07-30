@@ -161,8 +161,12 @@ def window_layer(
     smart_enabled: bool,
     codex_running: bool,
 ) -> Literal["top", "bottom"]:
-    """Map the live Codex process state to the widget's native window layer."""
-    return "top" if smart_enabled and codex_running else "bottom"
+    """Map the widget's native window layer from smart mode and Codex presence.
+
+    Smart off pins the widget to the top layer; smart on follows the live Codex
+    process state.
+    """
+    return "top" if not smart_enabled or codex_running else "bottom"
 
 
 def should_keep_topmost(
@@ -171,10 +175,16 @@ def should_keep_topmost(
     widget_focused: bool,
     foreground: ForegroundProcess,
 ) -> bool:
-    """Enable topmost only for widget focus or a Codex-related foreground."""
-    return smart_enabled and (
-        widget_focused
-        or is_codex_foreground(foreground.name, foreground.related_process_names)
+    """Decide topmost from smart mode, widget focus, and the foreground.
+
+    Smart off pins the widget topmost; smart on follows widget focus or a
+    Codex-related foreground.
+    """
+    if not smart_enabled:
+        return True
+    return widget_focused or is_codex_foreground(
+        foreground.name,
+        foreground.related_process_names,
     )
 
 

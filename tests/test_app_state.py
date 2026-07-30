@@ -94,7 +94,7 @@ def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:
     assert labels[MenuCommand.REFRESH] == "새로고침"
     assert labels[MenuCommand.THEME] == "다크/라이트 전환"
     assert labels[MenuCommand.MINI] == "미니모드"
-    assert labels[MenuCommand.SMART_TOPMOST] == "스마트 위"
+    assert labels[MenuCommand.SMART_TOPMOST] == "스마트 포지션 스위칭"
     assert labels[MenuCommand.HIDE] == "트레이로 숨기기"
     assert labels[MenuCommand.EXIT] == "종료"
     # No accelerator/shortcut hints remain in any label.
