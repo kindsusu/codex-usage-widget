@@ -2,6 +2,12 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# Without this, setuptools' flat-layout autodiscovery sees both `assets` and
+# `codex_usage_widget` as top-level packages and refuses to build. `assets` is
+# runtime data resolved via ASSET_ROOT (repo root), not an importable package.
+[tool.setuptools]
+packages = ["codex_usage_widget"]
+
 [project]
 name = "codex-usage-widget"
 version = "0.1.0"
