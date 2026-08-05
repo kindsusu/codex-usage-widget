@@ -131,8 +131,13 @@ def foreground_process_from_records(
 
 
 def format_window_position(x: int, y: int) -> str:
-    """Format Tk coordinates with one sign per axis, including negatives."""
-    return f"{x:+d}{y:+d}"
+    """Format Tk coordinates as a top-left anchored geometry offset.
+
+    Every axis keeps a leading ``+`` so Tk anchors to the top-left corner;
+    negative coordinates render as ``+-N`` instead of flipping the anchor to
+    the bottom or right edge of the virtual desktop.
+    """
+    return f"+{x}+{y}"
 
 
 def is_codex_foreground(

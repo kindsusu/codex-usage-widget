@@ -75,7 +75,21 @@ def test_format_window_position_preserves_signed_negative_coordinates() -> None:
     geometry = format_window_position(position.x, position.y)
 
     # Then
-    assert geometry == "-900+140"
+    assert geometry == "+-900+140"
+
+
+def test_format_window_position_keeps_top_left_anchor_for_negative_axes() -> None:
+    # Given: coordinates that a bare "-" sign would re-anchor to the far edges
+    above_top = WindowPosition(x=100, y=-12)
+    left_of_origin = WindowPosition(x=-5, y=50)
+
+    # When
+    above_top_geometry = format_window_position(above_top.x, above_top.y)
+    left_geometry = format_window_position(left_of_origin.x, left_of_origin.y)
+
+    # Then
+    assert above_top_geometry == "+100+-12"
+    assert left_geometry == "+-5+50"
 
 
 def test_initial_position_resolves_against_tk_virtual_desktop_bounds() -> None:
