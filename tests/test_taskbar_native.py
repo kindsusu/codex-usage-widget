@@ -206,6 +206,25 @@ def test_click_routing_uses_event_coordinates_not_stale_hover(
     assert calls == ["details"]
 
 
+def test_codex_left_and_right_click_have_distinct_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    host = NativeTaskbarHost(
+        lambda _x, _y: calls.append("details"),
+        lambda _x, _y: calls.append("visibility"),
+        lambda _x, _y: calls.append("menu"),
+    )
+    user32 = FakeUser32()
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+    point = 23 << 16 | 170
+
+    _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, point)
+    _ = host._window_proc(10, taskbar_native.WM_RBUTTONUP, 0, point)
+
+    assert calls == ["visibility", "menu"]
+
+
 def test_held_dismissal_consumes_only_its_matching_release(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

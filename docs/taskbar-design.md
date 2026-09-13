@@ -1,6 +1,6 @@
 # 작업표시줄 표시 시안 계약
 
-승인 원본은 [taskbar-widget-design.html](taskbar-widget-design.html)이다. 네이티브 렌더러는 이 문서의 기본 2행 막대형을 기준으로 하며, 바탕화면 일반·미니 위젯의 기존 레이아웃은 변경하지 않는다.
+승인 원본은 [taskbar-widget-design.html](taskbar-widget-design.html)이다. 네이티브 렌더러는 이 문서의 기본 2행 막대형을 기준으로 하며, 바탕화면 카드·미니 스트립 계약은 [desktop-card-design.md](desktop-card-design.md)에 둔다. 구현 및 Windows 검증 결과는 [리디자인 검수](desktop-redesign-validation.md)에 기록했다.
 
 ## 크기와 배치
 
@@ -29,5 +29,5 @@ Segoe UI Variable Text를 우선 사용하고 없으면 Segoe UI를 사용한다
 ## 상호작용
 
 - 사용량 막대를 클릭하면 비모달 상세를 열거나 닫는다. 상세에는 실제 반환된 한도만, 남은 비율과 초기화 정보를 표시한다.
-- 오른쪽 Codex 아이콘은 데스크톱 위젯과 같은 공통 컨텍스트 메뉴를 연다. 같은 아이콘을 다시 누르면 열린 메뉴를 닫으며, 다음 클릭으로 다시 열 수 있다.
+- 오른쪽 Codex 아이콘의 왼쪽 클릭은 [표시 설정 패널](desktop-card-design.md)을 열고, 오른쪽 클릭은 고급 네이티브 컨텍스트 메뉴를 연다.
 - 정상·호버 모두 바탕화면/작업표시줄 상태 설정을 바꾸지 않는다. 작업표시줄 연결 실패 시 기존 데스크톱 fallback 정책을 따른다.

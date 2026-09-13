@@ -4,7 +4,7 @@
 
 A small always-on-desktop Windows widget that shows your current Codex usage limits. It only displays the rate-limit windows Codex actually returns — no guessing of names or ordering. If your account has only a weekly limit, you see one row; if it also has a 5-hour limit, both rows appear.
 
-![widget preview](docs/img/full.png)
+![desktop card, dark theme](docs/img/desktop-card-dark.png)
 
 ## Requirements
 
@@ -30,15 +30,15 @@ Then double-click `실행.bat`, or run directly:
 
 ## Usage
 
-- **Header icons**: theme, transparency, mini mode, desktop hide
-- **Right-click menu**: refresh, dark/light toggle, mini mode, desktop/taskbar visibility, smart position switching, scale, mini scale, pet picker, desktop hide, quit
-- **Taskbar indicator**: an embedded, compact two-row view of the remaining percentage for the usage windows Codex actually returns. Its per-pixel-alpha surface lets the Windows taskbar material show through; hover adds a soft translucent background. Left-click toggles a non-modal detail popup; the Codex button on its right opens the same settings menu as the desktop widget. Click the Codex button again to close the menu.
-- **Independent surfaces**: desktop (full or mini) and taskbar display settings are saved independently. Both start enabled; if both are hidden, the tray remains the way to restore the widget.
-- **Mini mode**: a transparent strip with a 14px theme-aware Codex icon, short labels (`W`, `5h`), and battery bars at 5px spacing. The battery fill and inner percentage show the **remaining** ratio (100 − usage). Double-click to return to full mode.
+The desktop card and display panel follow the approved redesign. See the [Windows verification results](docs/desktop-redesign-validation.md) for tested interactions and rendering limits.
+
+- **Desktop card**: a Codex logo, plan, and remaining-usage bars in full mode; mini mode uses a 244×46 compact strip. The saved pet preference remains available but is not shown on this card design.
+- **Taskbar indicator**: an embedded, compact two-row view of the remaining percentage for the usage windows Codex actually returns. Its per-pixel-alpha surface lets the Windows taskbar material show through; hover adds a soft translucent background. Left-click on usage toggles a non-modal detail popup. Left-clicking the Codex button opens the three-checkbox display panel; right-clicking opens the advanced native menu for refresh, theme, opacity, scale, and exit.
+- **Independent surfaces**: desktop visibility, desktop mini mode, and taskbar visibility are saved independently. The four visibility states are both shown, desktop only, taskbar only, and both hidden (restorable from the tray).
 - **Moving the widget**: drag any empty area; the position is saved.
 - **Smart position switching**: when ON, the widget floats above other windows only while the widget itself or Codex (a terminal or the ChatGPT app) is in the foreground. When OFF, the widget stays always on top.
 
-Progress colors shift from low (green) through mid (yellow) to high (pink), and the exact percentage is always shown regardless of color. If the server returns credits or limit-reset credits, they appear in the bottom status area.
+Each progress bar represents remaining capacity. Its theme-aware green, amber, or red state is paired with the exact percentage, so the value does not depend on color alone. The taskbar detail popup shows the reset time for each returned usage window and its current update, stale-data, or error status.
 
 ## Troubleshooting
 
@@ -51,10 +51,8 @@ Progress colors shift from low (green) through mid (yellow) to high (pink), and 
 
 ## Privacy
 
-The widget asks the local official Codex `app-server` process for `account/rateLimits/read` only. It never reads or modifies `auth.json` directly, and it never stores, logs, or displays OAuth tokens, e-mail addresses, user IDs, or account IDs. The config file holds display settings only (theme, transparency, scale, position, pet, and desktop/taskbar visibility).
+The widget asks the local official Codex `app-server` process for `account/rateLimits/read` only. It never reads or modifies `auth.json` directly, and it never stores, logs, or displays OAuth tokens, e-mail addresses, user IDs, or account IDs. The config file holds display settings only (theme, transparency, scale, position, pet, and desktop/taskbar visibility). The retained pet preference is not rendered by the current desktop card.
 
 ## License & Assets
 
-Pet assets are shared with the same author's MIT project [kindsusu/claude-usage-widget](https://github.com/kindsusu/claude-usage-widget).
-
-Theme, transparency, and mini-mode use user-provided SVGs in `assets/icon`. The line variant of each SVG maps to the default state and the fill variant to hover/active; they are converted to transparent PNGs in the same folder so Tk can display them directly. Header button icons render at 14px to match the `Codex Plus` 10pt title height, with a 20px click target. The tray uses `codex.svg`; mini mode uses `codex-color.svg` for the light theme and the derived `codex-color-dark.svg` for the dark theme. The SVG originals are kept in editable form. The hide icon's fallback comes from [Tabler Icons](https://github.com/tabler/tabler-icons); the corresponding MIT notice is included in `THIRD_PARTY_NOTICES.md`.
+Pet assets are shared with the same author's MIT project [kindsusu/claude-usage-widget](https://github.com/kindsusu/claude-usage-widget). The bundled assets serve the desktop card, mini strip, taskbar indicator, and tray. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the applicable notices.

@@ -214,11 +214,13 @@ class NativeTaskbarHost:
     def __init__(
         self,
         on_details: Callable[[int, int], None],
-        on_menu: Callable[[int, int], None],
+        on_visibility: Callable[[int, int], None],
+        on_menu: Callable[[int, int], None] | None = None,
     ) -> None:
         """Bind callbacks and initialize thread-safe state."""
         self._on_details = on_details
-        self._on_menu = on_menu
+        self._on_visibility = on_visibility
+        self._on_menu = on_visibility if on_menu is None else on_menu
         self._lock = Lock()
         self._ready = Event()
         self._stop_requested = Event()
@@ -316,6 +318,17 @@ class NativeTaskbarHost:
         with self._lock:
             self._suppress_menu_release = True
         return True
+
+    def menu_button_contains_screen(self, x: int, y: int) -> bool:
+        """Return whether a screen point is inside the current Codex button."""
+        with self._lock:
+            hwnd = self._hwnd
+        if not hwnd:
+            return False
+        point = wintypes.POINT(x, y)
+        if not _user32().ScreenToClient(hwnd, ctypes.byref(point)):
+            return False
+        return self._region_at(hwnd, point.x, point.y) == "menu"
 
     def stop(self) -> None:
         """Destroy the HWND and join the worker for a bounded duration."""
@@ -450,8 +463,10 @@ class NativeTaskbarHost:
             if region is None:
                 return 0
             callback = self._on_menu
-            if message == WM_LBUTTONUP and region == "usage":
-                callback = self._on_details
+            if message == WM_LBUTTONUP:
+                callback = (
+                    self._on_details if region == "usage" else self._on_visibility
+                )
             with suppress(Exception):
                 callback(point.x, point.y)
             return 0

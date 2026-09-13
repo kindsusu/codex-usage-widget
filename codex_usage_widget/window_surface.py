@@ -12,10 +12,8 @@ if TYPE_CHECKING:
 
 
 def apply_window_surface(root: tk.Tk, tokens: ThemeTokens, *, mini: bool) -> None:
-    """Apply an opaque full surface or chroma-keyed mini surface."""
-    background = tokens.mini_background_key if mini else tokens.surface_primary
+    """Apply the chroma key used outside both rounded desktop card modes."""
+    _ = mini
+    background = tokens.mini_background_key
     _ = root.configure(bg=background)
-    _ = root.attributes(
-        "-transparentcolor",
-        tokens.mini_background_key if mini else "",
-    )
+    _ = root.attributes("-transparentcolor", tokens.mini_background_key)

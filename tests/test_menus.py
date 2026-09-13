@@ -104,6 +104,7 @@ def test_selected_command_remains_alive_until_idle_cleanup(
         noop,
         noop,
         noop,
+        noop,
         lambda: selected.append("selected"),
         noop,
         noop,

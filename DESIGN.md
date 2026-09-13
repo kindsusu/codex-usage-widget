@@ -1,5 +1,7 @@
 # Codex Usage Widget Design System
 
+> **현재 권위**: 2026-09-14 승인 리디자인은 [docs/desktop-card-design.md](docs/desktop-card-design.md)와 [docs/taskbar-design.md](docs/taskbar-design.md)를 따른다. 이 문서의 아래 내용은 기존 데스크톱 설계 기록으로 보존한다.
+
 ## 0. Research Log
 
 - Concrete reference: `kindsusu/claude-usage-widget`의 `widget.pyw`를 시각·동작 계약으로 사용한다.

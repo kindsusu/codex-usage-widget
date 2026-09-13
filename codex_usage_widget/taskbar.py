@@ -14,10 +14,11 @@ class TaskbarController:
     def __init__(
         self,
         on_details: Callable[[int, int], None],
+        on_visibility: Callable[[int, int], None],
         on_menu: Callable[[int, int], None],
     ) -> None:
         """Bind screen-coordinate callbacks without starting native work."""
-        self._host = NativeTaskbarHost(on_details, on_menu)
+        self._host = NativeTaskbarHost(on_details, on_visibility, on_menu)
 
     @property
     def available(self) -> bool:
@@ -49,6 +50,10 @@ class TaskbarController:
     def suppress_held_menu_release(self) -> bool:
         """Consume the release that follows a held popup-dismissal press."""
         return self._host.suppress_held_menu_release()
+
+    def menu_button_contains_screen(self, x: int, y: int) -> bool:
+        """Return whether a screen point is over the current Codex button."""
+        return self._host.menu_button_contains_screen(x, y)
 
     def stop(self) -> None:
         """Stop the worker and destroy only its owned HWND."""

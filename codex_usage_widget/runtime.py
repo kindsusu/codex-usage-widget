@@ -19,12 +19,13 @@ from codex_usage_widget.presentation import present_snapshot
 from codex_usage_widget.service import RefreshService
 from codex_usage_widget.startup import report_startup_problem
 from codex_usage_widget.taskbar import TaskbarController
-from codex_usage_widget.taskbar_details import TaskbarDetailsPopup
+from codex_usage_widget.taskbar_details import TaskbarDetailsPopup, monitor_metrics
 from codex_usage_widget.taskbar_model import build_taskbar_model
 from codex_usage_widget.theme import theme_tokens
 from codex_usage_widget.topmost import SmartTopmostController
 from codex_usage_widget.tray import TrayCallbacks, TrayController
 from codex_usage_widget.view import ViewActions, WidgetView
+from codex_usage_widget.visibility_panel import VisibilityCallbacks, VisibilityPanel
 from codex_usage_widget.visibility_policy import (
     EffectiveVisibility,
     VisibilityFallback,
@@ -48,6 +49,7 @@ SignalCommand: TypeAlias = Literal[
     "details",
     "menu",
     "menu_close",
+    "visibility_panel",
     "desktop",
     "mini",
     "taskbar",
@@ -99,7 +101,17 @@ class WidgetApplication:
         self._details = TaskbarDetailsPopup(root)
         self._taskbar = TaskbarController(
             lambda x, y: self._signals.put(("details", x, y)),
+            lambda x, y: self._signals.put(("visibility_panel", x, y)),
             self._queue_taskbar_menu,
+        )
+        self._visibility_panel = VisibilityPanel(
+            root,
+            VisibilityCallbacks(
+                self._toggle_desktop_visibility,
+                self._toggle_mini,
+                self._toggle_taskbar_visibility,
+                self._visibility_trigger_contains,
+            ),
         )
         self._taskbar.set_visible(self._config.taskbar_visible)
         self._taskbar_requested: bool | None = self._config.taskbar_visible
@@ -144,6 +156,7 @@ class WidgetApplication:
             hide=self.hide,
             refresh=self.refresh,
             menu=self._show_menu,
+            visibility=self._show_visibility_panel,
         )
         return WidgetView(
             self._root,
@@ -170,6 +183,7 @@ class WidgetApplication:
         self._topmost.stop()
         self._service.shutdown()
         self._details.close()
+        self._visibility_panel.close()
         self._taskbar.stop()
         self._tray.stop()
         self._view.dispose()
@@ -195,7 +209,7 @@ class WidgetApplication:
                 return
         self._apply_visibility()
 
-    def _handle_signal(self, signal: Signal) -> bool:  # noqa: C901
+    def _handle_signal(self, signal: Signal) -> bool:  # noqa: C901, PLR0912
         command, x, y = signal
         match command:
             case "show":
@@ -207,6 +221,7 @@ class WidgetApplication:
                 self.shutdown()
                 return True
             case "details":
+                self._visibility_panel.close()
                 if x == 0 and y == 0:
                     x, y = self._root.winfo_pointerx(), self._root.winfo_pointery()
                 self._details.toggle(x, y, self._service.state, self._config.theme)
@@ -214,6 +229,8 @@ class WidgetApplication:
                 self._show_menu(x, y)
             case "menu_close":
                 _ = self._context_menu.dismiss()
+            case "visibility_panel":
+                self._show_visibility_panel(x, y)
             case "desktop":
                 self._toggle_desktop_visibility()
             case "mini":
@@ -294,22 +311,20 @@ class WidgetApplication:
         _ = self._root.tk.call("tk", "scaling", 4.0 / 3.0 * factor)
         tokens = theme_tokens(self._config.theme)
         apply_window_surface(self._root, tokens, mini=self._config.mini_mode)
-        self._view.render(model, state, mini=self._config.mini_mode)
+        _, dpi = monitor_metrics(self._root.winfo_x(), self._root.winfo_y())
+        physical_scale = dpi / 96
+        self._view.render(
+            model,
+            state,
+            mini=self._config.mini_mode,
+            factor=factor,
+            physical_scale=physical_scale,
+        )
         self._taskbar.update(build_taskbar_model(state, datetime.now(tz=UTC)))
         self._details.update(state, self._config.theme)
+        self._visibility_panel.update(self._config)
         self._root.update_idletasks()
-        width = round(
-            (tokens.mini_width if self._config.mini_mode else tokens.full_width)
-            * factor
-        )
-        height = round(
-            (
-                tokens.mini_height
-                if self._config.mini_mode
-                else self._root.winfo_reqheight()
-            )
-            * factor
-        )
+        width, height = self._view.pixel_size
         _ = self._root.geometry(f"{width}x{height}")
         # apply_window_surface churns -transparentcolor/-bg, which lets Windows
         # re-add the taskbar button; strip it again after every (re)layout.
@@ -347,9 +362,11 @@ class WidgetApplication:
         self._save_and_render(actions.set_opacity(self._config, opacity))
 
     def _show_menu(self, x: int, y: int) -> None:
+        self._visibility_panel.close()
         callbacks = menus.MenuCallbacks(
             self.refresh,
             self._toggle_theme,
+            self._show_opacity,
             self._toggle_mini,
             self._toggle_desktop_visibility,
             self._toggle_taskbar_visibility,
@@ -362,6 +379,26 @@ class WidgetApplication:
             self._menu_closed,
         )
         self._context_menu.toggle(x, y, self._config, callbacks)
+
+    def _show_visibility_panel(self, x: int, y: int) -> None:
+        _ = self._context_menu.dismiss()
+        self._details.close()
+        brand = self._view.brand_screen_region
+        avoid = None
+        if brand is not None and brand.contains(x, y):
+            avoid = (
+                self._root.winfo_rootx(),
+                self._root.winfo_rooty(),
+                self._root.winfo_rootx() + self._root.winfo_width(),
+                self._root.winfo_rooty() + self._root.winfo_height(),
+            )
+        self._visibility_panel.toggle(x, y, self._config, avoid=avoid)
+
+    def _visibility_trigger_contains(self, x: int, y: int) -> bool:
+        if self._taskbar.menu_button_contains_screen(x, y):
+            return True
+        brand = self._view.brand_screen_region
+        return brand is not None and brand.contains(x, y)
 
     def _menu_opened(self) -> None:
         self._taskbar_menu_open.set()

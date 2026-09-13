@@ -24,6 +24,7 @@ class MenuCallbacks:
 
     refresh: Callable[[], None]
     theme: Callable[[], None]
+    opacity: Callable[[], None]
     mini: Callable[[], None]
     desktop_visibility: Callable[[], None]
     taskbar_visibility: Callable[[], None]
@@ -148,6 +149,7 @@ def _populate_context_menu(
         command=callbacks.theme,
         variable=theme_on,
     )
+    _ = menu.add_command(label="투명도 조절", command=callbacks.opacity)
     _ = menu.add_checkbutton(
         label="데스크톱 표시",
         command=callbacks.desktop_visibility,

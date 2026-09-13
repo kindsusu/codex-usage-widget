@@ -1,5 +1,5 @@
 # pyright: reportUnknownArgumentType=false, reportUnknownMemberType=false
-"""Token-driven native view kept separate from refresh orchestration."""
+"""Pillow-rendered desktop card kept separate from refresh orchestration."""
 
 from __future__ import annotations
 
@@ -7,15 +7,21 @@ import tkinter as tk
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
-from codex_usage_widget.mini_view import MiniSurface, MiniSurfaceSpec
-from codex_usage_widget.view_text import empty_text, footer_text
-from codex_usage_widget.widgets import PetCanvas, UsageMeter, VectorIconButton
+from PIL import ImageTk
+
+from codex_usage_widget.desktop_render import (
+    DesktopCardModel,
+    DesktopHitRegions,
+    HitRegion,
+    HoverRegion,
+    build_desktop_card_model,
+    render_desktop_card,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from codex_usage_widget.icons import IconName
-    from codex_usage_widget.presentation import SnapshotViewModel, UsageRowViewModel
+    from codex_usage_widget.presentation import SnapshotViewModel
     from codex_usage_widget.service import WidgetState
     from codex_usage_widget.theme import ThemeTokens
 
@@ -30,11 +36,12 @@ class ViewActions:
     hide: Callable[[], None]
     refresh: Callable[[], None]
     menu: Callable[[int, int], None]
+    visibility: Callable[[int, int], None]
 
 
 @final
 class WidgetView:
-    """Frameless full and mini layouts sharing one root window."""
+    """Frameless full and mini cards sharing one root and one data snapshot."""
 
     def __init__(
         self,
@@ -43,16 +50,42 @@ class WidgetView:
         pet_name: str,
         tokens: ThemeTokens,
     ) -> None:
-        """Create an initially empty root-owned surface."""
+        """Create an empty root-owned card; pet preference remains config-owned."""
+        _ = pet_name
         self._root = root
         self._actions = actions
-        self._pet_name = pet_name
-        self._tokens = tokens
-        self._body = tk.Frame(root)
-        self._surface: tk.Frame | None = None
-        self._mini_surface: MiniSurface | None = None
-        self._pets: list[PetCanvas] = []
+        self._light_theme = tokens.surface_primary == "#f4f3ee"
+        self._canvas: tk.Canvas | None = None
+        self._photo: ImageTk.PhotoImage | None = None
+        self._model: DesktopCardModel | None = None
+        self._mini = False
+        self._factor = 1.0
+        self._physical_scale = 1.0
+        self._hover: HoverRegion | None = None
+        self._pressed_region: HoverRegion | None = None
+        self._regions: DesktopHitRegions | None = None
+        self._pixel_size = (0, 0)
         self._menu_bind_id = root.bind("<Button-3>", self._open_menu, add="+")
+
+    @property
+    def pixel_size(self) -> tuple[int, int]:
+        """Return the most recently rendered physical image size."""
+        return self._pixel_size
+
+    @property
+    def brand_screen_region(self) -> HitRegion | None:
+        """Return the full-card brand trigger in virtual-screen coordinates."""
+        if self._canvas is None or self._regions is None or self._regions.brand is None:
+            return None
+        region = self._regions.brand
+        x = self._canvas.winfo_rootx()
+        y = self._canvas.winfo_rooty()
+        return HitRegion(
+            x + region.left,
+            y + region.top,
+            x + region.right,
+            y + region.bottom,
+        )
 
     def render(
         self,
@@ -60,161 +93,115 @@ class WidgetView:
         state: WidgetState,
         *,
         mini: bool,
+        factor: float = 1.0,
+        physical_scale: float = 1.0,
     ) -> None:
-        """Rebuild the compact surface from immutable state."""
+        """Render at logical size multiplied once by user and monitor scales."""
+        self._model = build_desktop_card_model(view_model, state)
+        self._mini = mini
+        self._factor = factor
+        self._physical_scale = physical_scale
+        self._hover = None
+        self._pressed_region = None
         self._dispose_surface()
-        if mini:
-            self._mini_surface = MiniSurface(
-                self._root,
-                MiniSurfaceSpec(
-                    view_model,
-                    state,
-                    self._tokens,
-                    self._actions.mini,
-                ),
-            )
-        else:
-            self._render_full(view_model, state)
+        canvas = tk.Canvas(
+            self._root,
+            bg="#fdfdfb",
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2" if mini else "arrow",
+            takefocus=True,
+        )
+        self._canvas = canvas
+        _ = canvas.pack(fill="both", expand=True)
+        _ = canvas.bind("<Motion>", self._motion)
+        _ = canvas.bind("<Leave>", self._leave)
+        _ = canvas.bind("<ButtonPress-1>", self._press)
+        _ = canvas.bind("<ButtonRelease-1>", self._release)
+        _ = canvas.bind("<Double-Button-1>", self._double_click)
+        self._paint()
 
     def dispose(self) -> None:
-        """Release bindings, surfaces, and all scheduled pet callbacks."""
+        """Release bindings and the root-owned image surface."""
         self._dispose_surface()
         if self._menu_bind_id is not None:
             self._root.unbind("<Button-3>", self._menu_bind_id)
             self._menu_bind_id = None
 
-    def _render_full(
-        self, view_model: SnapshotViewModel | None, state: WidgetState
-    ) -> None:
-        tokens = self._tokens
-        outer = tk.Frame(
-            self._root,
-            bg=tokens.surface_primary,
-            highlightbackground=tokens.bar_background,
-            highlightthickness=1,
-            padx=tokens.space_5,
-            pady=tokens.space_5,
+    def _paint(self) -> None:
+        if self._canvas is None or self._model is None:
+            return
+        rendered = render_desktop_card(
+            self._model,
+            mode="mini" if self._mini else "full",
+            light_theme=self._light_theme,
+            scale=self._factor * self._physical_scale,
+            hover_region=self._hover,
         )
-        self._surface = outer
-        _ = outer.pack(fill="both", expand=True)
-        header = tk.Frame(outer, bg=tokens.surface_primary)
-        _ = header.pack(fill="x", pady=(0, tokens.space_3))
-        pet = PetCanvas(header, self._pet_name, tokens)
-        self._pets.append(pet)
-        _ = pet.pack(side="left")
-        title = tk.Label(
-            header,
-            text="Codex" if view_model is None else view_model.title,
-            bg=tokens.surface_primary,
-            fg=tokens.text_primary,
-            font=(tokens.font_family, 10, "bold"),
+        photo = ImageTk.PhotoImage(rendered.image, master=self._canvas)
+        self._photo = photo
+        self._regions = rendered.hit_regions
+        self._pixel_size = rendered.image.size
+        _ = self._canvas.configure(
+            width=rendered.image.width, height=rendered.image.height
         )
-        _ = title.pack(side="left", padx=(tokens.space_2, 0))
-        controls = tk.Frame(header, bg=tokens.surface_primary)
-        _ = controls.pack(side="right")
-        specs: tuple[tuple[IconName, Callable[[], None], str], ...] = (
-            ("theme", self._actions.theme, "다크/라이트 전환"),
-            ("opacity", self._actions.opacity, "투명도 조절"),
-            ("mini", self._actions.mini, "미니모드"),
-            ("close", self._actions.hide, "트레이로 숨기기"),
-        )
-        for icon, callback, tooltip in specs:
-            button = VectorIconButton(controls, icon, callback, tooltip, tokens)
-            _ = button.pack(side="left", padx=(tokens.space_1, 0))
-        divider = tk.Frame(outer, height=1, bg=tokens.bar_background)
-        _ = divider.pack(fill="x", pady=(0, tokens.space_3))
-        self._body = tk.Frame(outer, bg=tokens.surface_primary)
-        _ = self._body.pack(fill="x")
-        if view_model is None:
-            self._render_empty(state)
-        else:
-            for row in view_model.rows:
-                self._render_row(row)
-        footer = tk.Label(
-            outer,
-            text=footer_text(view_model, state),
-            bg=tokens.surface_primary,
-            fg=tokens.status_error if state.failure is not None else tokens.text_muted,
-            anchor="w",
-            font=(tokens.font_family, 7),
-        )
-        _ = footer.pack(fill="x", pady=(tokens.space_3, 0))
-        self._root.geometry(f"{tokens.full_width}x{max(104, outer.winfo_reqheight())}")
+        _ = self._canvas.delete("all")
+        _ = self._canvas.create_image(0, 0, image=photo, anchor="nw")
+        _ = self._root.geometry(f"{rendered.image.width}x{rendered.image.height}")
 
-    def _render_row(self, row: UsageRowViewModel) -> None:
-        tokens = self._tokens
-        card = tk.Frame(self._body, bg=tokens.surface_primary)
-        _ = card.pack(fill="x", pady=(0, tokens.row_gap))
-        line = tk.Frame(card, bg=tokens.surface_primary)
-        _ = line.pack(fill="x")
-        _ = tk.Label(
-            line,
-            text=row.label,
-            bg=tokens.surface_primary,
-            fg=tokens.text_primary,
-            font=(tokens.font_family, 9, "bold"),
-        ).pack(side="left")
-        _ = tk.Label(
-            line,
-            text=row.percent_text,
-            bg=tokens.surface_primary,
-            fg=tokens.text_primary,
-            font=(tokens.font_family, 9, "bold"),
-        ).pack(side="right")
-        meter = UsageMeter(card, tokens)
-        _ = meter.pack(fill="x", pady=(tokens.space_2, tokens.space_1))
-        meter.render(row.window.used_percent, row.meter_color)
-        _ = tk.Label(
-            card,
-            text=row.reset_text,
-            bg=tokens.surface_primary,
-            fg=tokens.text_secondary,
-            anchor="w",
-            font=(tokens.font_family, 8),
-        ).pack(fill="x")
+    def _motion(self, event: tk.Event[tk.Misc]) -> None:
+        hover = self._region_at(event.x, event.y)
+        if hover != self._hover:
+            self._hover = hover
+            self._paint()
 
-    def _render_empty(self, state: WidgetState) -> None:
-        tokens = self._tokens
-        container = tk.Frame(
-            self._body,
-            bg=tokens.surface_secondary,
-            padx=tokens.space_3,
-            pady=tokens.space_5,
-        )
-        _ = container.pack(fill="x", pady=(tokens.space_1, tokens.space_2))
-        if state.failure is not None:
-            marker = tk.Canvas(
-                container,
-                width=16,
-                height=16,
-                bg=tokens.surface_secondary,
-                highlightthickness=0,
-            )
-            _ = marker.pack(side="left", padx=(0, tokens.space_3))
-            _ = marker.create_oval(2, 2, 14, 14, outline=tokens.status_error, width=1.5)
-            _ = marker.create_line(8, 5, 8, 9, fill=tokens.status_error, width=1.5)
-            _ = marker.create_oval(7, 11, 9, 13, fill=tokens.status_error, outline="")
-        _ = tk.Label(
-            container,
-            text=empty_text(state),
-            bg=tokens.surface_secondary,
-            fg=tokens.text_primary if state.failure is None else tokens.status_error,
-            anchor="w",
-            justify="left",
-            wraplength=tokens.bar_width,
-            font=(tokens.font_family, 9),
-        ).pack(side="left", fill="x", expand=True)
+    def _leave(self, _event: tk.Event[tk.Misc]) -> None:
+        if self._hover is not None:
+            self._hover = None
+            self._paint()
+
+    def _press(self, event: tk.Event[tk.Misc]) -> str | None:
+        self._pressed_region = self._region_at(event.x, event.y)
+        if self._pressed_region is not None:
+            _ = self._canvas.focus_set() if self._canvas is not None else None
+            return "break"
+        return None
+
+    def _release(self, event: tk.Event[tk.Misc]) -> str | None:
+        region = self._region_at(event.x, event.y)
+        pressed_region, self._pressed_region = self._pressed_region, None
+        if pressed_region is None:
+            return None
+        if region != pressed_region:
+            return "break"
+        if pressed_region == "brand":
+            self._actions.visibility(event.x_root, event.y_root)
+            return "break"
+        if pressed_region == "mode":
+            self._actions.mini()
+            return "break"
+        return "break"
+
+    def _double_click(self, event: tk.Event[tk.Misc]) -> str | None:
+        if self._mini and self._region_at(event.x, event.y) is None:
+            self._actions.mini()
+            return "break"
+        return None
+
+    def _region_at(self, x: int, y: int) -> HoverRegion | None:
+        if self._regions is None:
+            return None
+        if self._regions.brand is not None and self._regions.brand.contains(x, y):
+            return "brand"
+        return "mode" if self._regions.mode.contains(x, y) else None
 
     def _dispose_surface(self) -> None:
-        if self._mini_surface is not None:
-            self._mini_surface.dispose()
-            self._mini_surface = None
-        for pet in self._pets:
-            pet.dispose()
-        self._pets.clear()
-        if self._surface is not None:
-            self._surface.destroy()
-            self._surface = None
+        if self._canvas is not None:
+            self._canvas.destroy()
+            self._canvas = None
+        self._photo = None
+        self._regions = None
+        self._pressed_region = None
 
     def _open_menu(self, event: tk.Event[tk.Misc]) -> None:
         self._actions.menu(event.x_root, event.y_root)
