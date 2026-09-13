@@ -14,6 +14,8 @@ class MenuCommand(StrEnum):
     THEME = "theme"
     MINI = "mini"
     SMART_TOPMOST = "smart_topmost"
+    DESKTOP_VISIBILITY = "desktop_visibility"
+    TASKBAR_VISIBILITY = "taskbar_visibility"
     HIDE = "hide"
     EXIT = "exit"
 
@@ -60,6 +62,16 @@ def toggle_smart_topmost(config: WidgetConfig) -> WidgetConfig:
     return replace(config, smart_topmost=not config.smart_topmost)
 
 
+def toggle_desktop_visibility(config: WidgetConfig) -> WidgetConfig:
+    """Flip whether the regular desktop widget surface is shown."""
+    return replace(config, desktop_visible=not config.desktop_visible)
+
+
+def toggle_taskbar_visibility(config: WidgetConfig) -> WidgetConfig:
+    """Flip whether the native taskbar usage indicator is shown."""
+    return replace(config, taskbar_visible=not config.taskbar_visible)
+
+
 def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
     """Build the menu's portable labels and checked states."""
     return (
@@ -74,6 +86,16 @@ def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
             MenuCommand.SMART_TOPMOST,
             "스마트 포지션 스위칭",
             checked=config.smart_topmost,
+        ),
+        MenuItemModel(
+            MenuCommand.DESKTOP_VISIBILITY,
+            "바탕화면 위젯 표시",
+            checked=config.desktop_visible,
+        ),
+        MenuItemModel(
+            MenuCommand.TASKBAR_VISIBILITY,
+            "작업표시줄 표시",
+            checked=config.taskbar_visible,
         ),
         MenuItemModel(MenuCommand.HIDE, "트레이로 숨기기"),
         MenuItemModel(MenuCommand.EXIT, "종료"),

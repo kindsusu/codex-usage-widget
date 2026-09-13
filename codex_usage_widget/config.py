@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
 ConfigJson: TypeAlias = (
-    str | int | float | bool | None | list["ConfigJson"] | dict[str, "ConfigJson"]
+    str | int | float | bool | list["ConfigJson"] | dict[str, "ConfigJson"] | None
 )
 _MIN_OPACITY: Final = 0.3
 _MIN_SCALE: Final = 0.75
@@ -48,6 +48,8 @@ class WidgetConfig:
     mini_mode: bool = False
     mini_scale: float = 1.0
     smart_topmost: bool = True
+    desktop_visible: bool = True
+    taskbar_visible: bool = True
     pet: str | None = None
     refresh_seconds: int = 180
     position: WindowPosition | None = _DEFAULT_POSITION
@@ -64,6 +66,8 @@ class WidgetConfig:
             ),
             ("mini_mode", type(self.mini_mode) is bool),
             ("smart_topmost", type(self.smart_topmost) is bool),
+            ("desktop_visible", type(self.desktop_visible) is bool),
+            ("taskbar_visible", type(self.taskbar_visible) is bool),
             (
                 "pet",
                 self.pet is None or (type(self.pet) is str and self.pet in PET_NAMES),
@@ -114,6 +118,8 @@ class _ConfigData(TypedDict):
     mini_mode: bool
     mini_scale: float
     smart_topmost: bool
+    desktop_visible: bool
+    taskbar_visible: bool
     pet: str | None
     refresh_seconds: int
     position: _PositionData | None
@@ -221,6 +227,14 @@ def _parse_config(values: Mapping[str, ConfigJson]) -> WidgetConfig:
             values.get("smart_topmost"),
             default=defaults.smart_topmost,
         ),
+        desktop_visible=_boolean(
+            values.get("desktop_visible"),
+            default=defaults.desktop_visible,
+        ),
+        taskbar_visible=_boolean(
+            values.get("taskbar_visible"),
+            default=defaults.taskbar_visible,
+        ),
         pet=_pet(values.get("pet"), defaults.pet),
         refresh_seconds=_bounded_int(
             values.get("refresh_seconds"),
@@ -305,6 +319,8 @@ def _to_data(config: WidgetConfig) -> _ConfigData:
         "mini_mode": config.mini_mode,
         "mini_scale": config.mini_scale,
         "smart_topmost": config.smart_topmost,
+        "desktop_visible": config.desktop_visible,
+        "taskbar_visible": config.taskbar_visible,
         "pet": config.pet,
         "refresh_seconds": config.refresh_seconds,
         "position": position_data,

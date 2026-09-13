@@ -1,3 +1,4 @@
+# pyright: reportAny=false, reportUnknownMemberType=false
 """Import-safe pure geometry and guarded Windows integration helpers."""
 
 from __future__ import annotations
@@ -5,6 +6,7 @@ from __future__ import annotations
 import ctypes
 import os
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
 if TYPE_CHECKING:
@@ -38,8 +40,11 @@ class MonitorRect:
 
 
 _SINGLETON_NAME: Final = "codex-usage-widget-singleton"
+_RESTORE_EVENT_NAME: Final = "Local\\codex-usage-widget-restore-v1"
 _MIN_VISIBLE_AREA: Final = 800
 _ERROR_ALREADY_EXISTS: Final = 183
+_EVENT_MODIFY_STATE: Final = 0x0002
+_WAIT_OBJECT_0: Final = 0
 _FALSE: Final = 0
 _GA_ROOT: Final = 2
 _SWP_ZORDER_FLAGS: Final = 0x13
@@ -48,6 +53,15 @@ _GWL_EXSTYLE: Final = -20
 _WS_EX_TOOLWINDOW: Final = 0x00000080
 _WS_EX_APPWINDOW: Final = 0x00040000
 _singleton_handles: Final[list[int]] = []
+_restore_event_handles: Final[list[int]] = []
+
+
+class SingleInstanceStatus(StrEnum):
+    """Result of attempting to become the widget's primary instance."""
+
+    ACQUIRED = "acquired"
+    ALREADY_RUNNING = "already_running"
+    UNAVAILABLE = "unavailable"
 
 
 def taskbar_hidden_exstyle(exstyle: int) -> int:
@@ -149,10 +163,12 @@ def enable_dpi_awareness() -> bool:
         return result in (0, -2147024891)
 
 
-def acquire_single_instance(name: str = _SINGLETON_NAME) -> bool:
-    """Acquire a process-lifetime named mutex and reject API failures."""
+def acquire_single_instance_status(
+    name: str = _SINGLETON_NAME,
+) -> SingleInstanceStatus:
+    """Acquire the process mutex while preserving duplicate/error identity."""
     if os.name != "nt":
-        return True
+        return SingleInstanceStatus.ACQUIRED
     try:
         kernel32 = ctypes.CDLL("kernel32", use_last_error=True)
         kernel32.CreateMutexW.argtypes = [
@@ -164,23 +180,91 @@ def acquire_single_instance(name: str = _SINGLETON_NAME) -> bool:
         create_mutex = _CreateMutexFunction(call=kernel32.CreateMutexW)
         handle = create_mutex.call(None, _FALSE, name)
     except (AttributeError, OSError, TypeError, ValueError):
-        return False
+        return SingleInstanceStatus.UNAVAILABLE
     if not handle:
-        return False
+        return SingleInstanceStatus.UNAVAILABLE
     handle_number = int(handle)
     if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
         kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
         kernel32.CloseHandle.restype = ctypes.c_int
         close_handle = _CloseHandleFunction(call=kernel32.CloseHandle)
         _ = close_handle.call(handle_number)
-        return False
+        return SingleInstanceStatus.ALREADY_RUNNING
     _singleton_handles.append(handle_number)
+    return SingleInstanceStatus.ACQUIRED
+
+
+def acquire_single_instance(name: str = _SINGLETON_NAME) -> bool:
+    """Compatibility wrapper returning whether this process became primary."""
+    return acquire_single_instance_status(name) is SingleInstanceStatus.ACQUIRED
+
+
+def create_restore_event(name: str = _RESTORE_EVENT_NAME) -> bool:
+    """Create the primary instance's auto-reset desktop-restore event."""
+    if os.name != "nt":
+        return True
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateEventW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_wchar_p,
+        ]
+        kernel32.CreateEventW.restype = ctypes.c_void_p
+        handle = kernel32.CreateEventW(None, 0, 0, name)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    if not handle:
+        return False
+    _restore_event_handles.append(int(handle))
     return True
+
+
+def request_existing_instance_restore(name: str = _RESTORE_EVENT_NAME) -> bool:
+    """Signal a compatible running instance to restore its desktop surface."""
+    if os.name != "nt":
+        return False
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenEventW.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_wchar_p]
+        kernel32.OpenEventW.restype = ctypes.c_void_p
+        kernel32.SetEvent.argtypes = [ctypes.c_void_p]
+        kernel32.SetEvent.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        handle = kernel32.OpenEventW(_EVENT_MODIFY_STATE, 0, name)
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.SetEvent(handle))
+        finally:
+            _ = kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
+def consume_restore_request() -> bool:
+    """Consume one pending restore request without blocking Tk."""
+    if os.name != "nt" or not _restore_event_handles:
+        return False
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.WaitForSingleObject.restype = ctypes.c_ulong
+        result = kernel32.WaitForSingleObject(_restore_event_handles[-1], 0)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+    else:
+        return result == _WAIT_OBJECT_0
 
 
 def release_single_instance() -> None:
     """Release the held singleton mutex if this process owns one."""
-    if not _singleton_handles or os.name != "nt":
+    if os.name != "nt":
+        return
+    _close_restore_events()
+    if not _singleton_handles:
         return
     handle = _singleton_handles.pop()
     try:
@@ -191,6 +275,18 @@ def release_single_instance() -> None:
         _ = close_handle.call(handle)
     except (AttributeError, OSError):
         return
+
+
+def _close_restore_events() -> None:
+    while _restore_event_handles:
+        handle = _restore_event_handles.pop()
+        try:
+            kernel32 = ctypes.WinDLL("kernel32")
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = ctypes.c_int
+            _ = kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, TypeError, ValueError):
+            continue
 
 
 def set_window_zorder(hwnd: int, mode: Literal["top", "normal", "bottom"]) -> bool:

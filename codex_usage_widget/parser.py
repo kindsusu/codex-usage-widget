@@ -8,7 +8,7 @@ from typing import Final, TypeAlias, final
 from codex_usage_widget.models import CreditStatus, UsageSnapshot, UsageWindow
 
 JsonValue: TypeAlias = (
-    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+    str | int | float | bool | list["JsonValue"] | dict[str, "JsonValue"] | None
 )
 JsonPath: TypeAlias = tuple[str | int, ...]
 JsonObject: TypeAlias = Mapping[str, JsonValue]

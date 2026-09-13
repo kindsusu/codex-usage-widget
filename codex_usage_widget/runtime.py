@@ -7,7 +7,8 @@ import tkinter as tk
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Queue
-from typing import TYPE_CHECKING, Final, Literal, final
+from threading import Event
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, final
 
 from codex_usage_widget import actions, menus, windows
 from codex_usage_widget import config as widget_config
@@ -16,10 +17,19 @@ from codex_usage_widget.fetcher import fetch_snapshot
 from codex_usage_widget.position_store import persist_window_position
 from codex_usage_widget.presentation import present_snapshot
 from codex_usage_widget.service import RefreshService
+from codex_usage_widget.startup import report_startup_problem
+from codex_usage_widget.taskbar import TaskbarController
+from codex_usage_widget.taskbar_details import TaskbarDetailsPopup
+from codex_usage_widget.taskbar_model import build_taskbar_model
 from codex_usage_widget.theme import theme_tokens
 from codex_usage_widget.topmost import SmartTopmostController
-from codex_usage_widget.tray import TrayController
+from codex_usage_widget.tray import TrayCallbacks, TrayController
 from codex_usage_widget.view import ViewActions, WidgetView
+from codex_usage_widget.visibility_policy import (
+    EffectiveVisibility,
+    VisibilityFallback,
+    resolve_visibility,
+)
 from codex_usage_widget.window_runtime import (
     format_window_position,
     resolve_initial_position,
@@ -31,6 +41,19 @@ if TYPE_CHECKING:
     from codex_usage_widget.config import WidgetConfig
 
 _CONFIG_PATH: Final = Path(__file__).resolve().parent.parent / "widget_config.json"
+_TASKBAR_RETRY_MS: Final = 10_000
+SignalCommand: TypeAlias = Literal[
+    "show",
+    "exit",
+    "details",
+    "menu",
+    "menu_close",
+    "desktop",
+    "mini",
+    "taskbar",
+    "refresh",
+]
+Signal: TypeAlias = tuple[SignalCommand, int, int]
 
 
 @final
@@ -51,17 +74,39 @@ class WidgetApplication:
             lambda value: root.attributes("-topmost", value),
         )
         self._service = RefreshService(fetch_snapshot)
-        self._signals: Queue[Literal["show", "exit"]] = Queue()
+        self._signals: Queue[Signal] = Queue()
+        self._taskbar_menu_open = Event()
         self._drag_origin: tuple[int, int, int, int] | None = None
         self._closing = False
         self._tray = TrayController(
-            lambda: self._signals.put("show"),
-            lambda: self._signals.put("exit"),
+            lambda: self._queue("show"),
+            lambda: self._queue("exit"),
+            callbacks=TrayCallbacks(
+                toggle_desktop=lambda: self._queue("desktop"),
+                toggle_mini=lambda: self._queue("mini"),
+                toggle_taskbar=lambda: self._queue("taskbar"),
+                show_details=lambda: self._queue("details"),
+                desktop_checked=lambda: self._config.desktop_visible,
+                mini_checked=lambda: self._config.mini_mode,
+                taskbar_checked=lambda: self._config.taskbar_visible,
+                refresh=lambda: self._queue("refresh"),
+            ),
         )
         _ = self._tray.start()
         self._prepare_root()
         self._view = self._new_view()
+        self._context_menu = menus.ContextMenuController(root)
+        self._details = TaskbarDetailsPopup(root)
+        self._taskbar = TaskbarController(
+            lambda x, y: self._signals.put(("details", x, y)),
+            self._queue_taskbar_menu,
+        )
+        self._taskbar.set_visible(self._config.taskbar_visible)
+        self._taskbar_requested: bool | None = self._config.taskbar_visible
+        _ = self._taskbar.start()
+        self._effective_visibility: EffectiveVisibility | None = None
         self._render()
+        self._apply_visibility()
         apply_native_window_state(self._root, self._topmost.apply)
         _ = self._service.request_refresh()
         _ = root.after(100, self._poll)
@@ -69,6 +114,7 @@ class WidgetApplication:
         # so reassert the tool-window style once the shell has caught up.
         _ = root.after(200, self._reassert_no_taskbar)
         _ = root.after(self._config.refresh_seconds * 1000, self._periodic_refresh)
+        _ = root.after(_TASKBAR_RETRY_MS, self._retry_taskbar)
         self._topmost.start()
 
     def _reassert_no_taskbar(self) -> None:
@@ -112,11 +158,9 @@ class WidgetApplication:
         self._render()
 
     def hide(self) -> None:
-        """Hide without terminating so the tray can restore the widget."""
-        if self._tray.available:
-            self._root.withdraw()
-            return
-        self.shutdown()
+        """Persistently hide only the desktop surface."""
+        if self._config.desktop_visible:
+            self._toggle_desktop_visibility()
 
     def shutdown(self) -> None:
         """Stop adapters and ignore any worker result that arrives later."""
@@ -125,6 +169,8 @@ class WidgetApplication:
         self._closing = True
         self._topmost.stop()
         self._service.shutdown()
+        self._details.close()
+        self._taskbar.stop()
         self._tray.stop()
         self._view.dispose()
         windows.release_single_instance()
@@ -133,25 +179,98 @@ class WidgetApplication:
     def _poll(self) -> None:
         if self._closing:
             return
+        # Schedule before dispatch: tk_popup starts a nested modal Tk loop, so a
+        # later taskbar click must still drain and unpost that active menu.
+        _ = self._root.after(100, self._poll)
+        if windows.consume_restore_request():
+            self._signals.put(("show", 0, 0))
         if self._service.poll() is not None:
             self._render()
-        try:
-            signal = self._signals.get_nowait()
-        except Empty:
-            signal = None
-        match signal:  # noqa: RUF100  # noqa: MATCH_OK
+        while True:
+            try:
+                signal = self._signals.get_nowait()
+            except Empty:
+                break
+            if self._handle_signal(signal) or self._closing:
+                return
+        self._apply_visibility()
+
+    def _handle_signal(self, signal: Signal) -> bool:  # noqa: C901
+        command, x, y = signal
+        match command:
             case "show":
-                self._root.deiconify()
-                apply_native_window_state(self._root, self._topmost.apply)
+                if not self._config.desktop_visible:
+                    self._toggle_desktop_visibility()
+                else:
+                    self._apply_visibility(force=True)
             case "exit":
                 self.shutdown()
-                return
-            case None:
-                pass
-        if not self._tray.available and self._root.state() == "withdrawn":
-            self._root.deiconify()
-            _ = windows.hide_from_taskbar(self._root.winfo_id())
-        _ = self._root.after(100, self._poll)
+                return True
+            case "details":
+                if x == 0 and y == 0:
+                    x, y = self._root.winfo_pointerx(), self._root.winfo_pointery()
+                self._details.toggle(x, y, self._service.state, self._config.theme)
+            case "menu":
+                self._show_menu(x, y)
+            case "menu_close":
+                _ = self._context_menu.dismiss()
+            case "desktop":
+                self._toggle_desktop_visibility()
+            case "mini":
+                self._toggle_mini()
+            case "taskbar":
+                self._toggle_taskbar_visibility()
+            case "refresh":
+                self.refresh()
+        return False
+
+    def _queue(self, command: SignalCommand) -> None:
+        self._signals.put((command, 0, 0))
+
+    def _queue_taskbar_menu(self, x: int, y: int) -> None:
+        """Snapshot popup state on native click to avoid close/reopen races."""
+        command: SignalCommand = (
+            "menu_close" if self._taskbar_menu_open.is_set() else "menu"
+        )
+        self._signals.put((command, x, y))
+
+    def _apply_visibility(self, *, force: bool = False) -> None:
+        effective = resolve_visibility(
+            desktop_requested=self._config.desktop_visible,
+            taskbar_requested=self._config.taskbar_visible,
+            taskbar_attached=self._taskbar.attached,
+            tray_available=self._tray.available,
+        )
+        requested = self._config.taskbar_visible
+        if requested != getattr(self, "_taskbar_requested", None):
+            # Keep the requested native surface active while Explorer attachment
+            # is pending. Feeding effective visibility back here would prevent
+            # the native worker from ever reattaching.
+            self._taskbar.set_visible(requested)
+            self._taskbar_requested = requested
+        if force or effective != self._effective_visibility:
+            fallback_status = {
+                VisibilityFallback.TASKBAR_UNAVAILABLE: "작업표시줄 연결 대기 중",
+                VisibilityFallback.NO_RESTORE_PATH: (
+                    "트레이 복구를 위해 데스크톱 표시 중"
+                ),
+                None: None,
+            }[effective.fallback]
+            self._tray.set_status(fallback_status)
+            if effective.desktop:
+                self._root.deiconify()
+                apply_native_window_state(self._root, self._topmost.apply)
+            else:
+                self._root.withdraw()
+            self._effective_visibility = effective
+
+    def _retry_taskbar(self) -> None:
+        if self._closing:
+            return
+        if self._config.taskbar_visible and not self._taskbar.available:
+            _ = self._taskbar.start()
+        self._apply_visibility()
+        _ = self._root.after(_TASKBAR_RETRY_MS, self._retry_taskbar)
 
     def _periodic_refresh(self) -> None:
         if self._closing:
@@ -176,6 +295,8 @@ class WidgetApplication:
         tokens = theme_tokens(self._config.theme)
         apply_window_surface(self._root, tokens, mini=self._config.mini_mode)
         self._view.render(model, state, mini=self._config.mini_mode)
+        self._taskbar.update(build_taskbar_model(state, datetime.now(tz=UTC)))
+        self._details.update(state, self._config.theme)
         self._root.update_idletasks()
         width = round(
             (tokens.mini_width if self._config.mini_mode else tokens.full_width)
@@ -204,12 +325,20 @@ class WidgetApplication:
             self._view = self._new_view()
         self._topmost.apply()
         self._render()
+        self._apply_visibility()
+        self._tray.refresh_menu()
 
     def _toggle_theme(self) -> None:
         self._save_and_render(actions.toggle_theme(self._config), rebuild=True)
 
     def _toggle_mini(self) -> None:
         self._save_and_render(actions.toggle_mini_mode(self._config))
+
+    def _toggle_desktop_visibility(self) -> None:
+        self._save_and_render(actions.toggle_desktop_visibility(self._config))
+
+    def _toggle_taskbar_visibility(self) -> None:
+        self._save_and_render(actions.toggle_taskbar_visibility(self._config))
 
     def _show_opacity(self) -> None:
         menus.show_opacity_popup(self._root, self._config.opacity, self._set_opacity)
@@ -222,15 +351,26 @@ class WidgetApplication:
             self.refresh,
             self._toggle_theme,
             self._toggle_mini,
+            self._toggle_desktop_visibility,
+            self._toggle_taskbar_visibility,
             self._toggle_topmost,
             self.hide,
             self.shutdown,
             self._set_scale,
             self._set_pet,
-            self._topmost.suspend,
-            self._topmost.resume,
+            self._menu_opened,
+            self._menu_closed,
         )
-        menus.show_context_menu(self._root, x, y, self._config, callbacks)
+        self._context_menu.toggle(x, y, self._config, callbacks)
+
+    def _menu_opened(self) -> None:
+        self._taskbar_menu_open.set()
+        self._topmost.suspend()
+
+    def _menu_closed(self) -> None:
+        _ = self._taskbar.suppress_held_menu_release()
+        self._taskbar_menu_open.clear()
+        self._topmost.resume()
 
     def _set_scale(self, value: float, mini: bool) -> None:
         self._save_and_render(actions.set_scale(self._config, value, mini=mini))
@@ -269,9 +409,16 @@ class WidgetApplication:
 def run_widget() -> int:
     """Acquire the singleton and block in Tk's event loop."""
     _ = windows.enable_dpi_awareness()
-    if not windows.acquire_single_instance():
+    status = windows.acquire_single_instance_status()
+    if status is windows.SingleInstanceStatus.ALREADY_RUNNING:
+        if not windows.request_existing_instance_restore():
+            report_startup_problem("already_running")
         return 0
+    if status is windows.SingleInstanceStatus.UNAVAILABLE:
+        report_startup_problem("single_instance_error")
+        return 1
     try:
+        _ = windows.create_restore_event()
         root = tk.Tk()
         _ = WidgetApplication(root)
         root.mainloop()

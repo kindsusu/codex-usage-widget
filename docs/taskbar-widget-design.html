@@ -1,0 +1,449 @@
+<div id="codex-taskbar-proposal">
+  <style>
+    #codex-taskbar-proposal {
+      color-scheme: light dark;
+      --ct-bg: light-dark(#eef3f8, #111827);
+      --ct-wall-a: light-dark(#dceafe, #16243a);
+      --ct-wall-b: light-dark(#f4e9fb, #241a31);
+      --ct-surface: light-dark(rgba(255,255,255,.94), rgba(29,37,51,.96));
+      --ct-surface-solid: light-dark(#ffffff, #1d2533);
+      --ct-taskbar: light-dark(rgba(243,247,251,.96), rgba(22,29,41,.97));
+      --ct-text: light-dark(#172033, #f3f6fb);
+      --ct-muted: light-dark(#5e6b7d, #aeb8c7);
+      --ct-line: light-dark(rgba(36,49,70,.14), rgba(231,237,247,.15));
+      --ct-track: light-dark(#dfe6ef, #3a4558);
+      --ct-green: light-dark(#18864b, #47c77d);
+      --ct-amber: light-dark(#c27612, #e6a842);
+      --ct-hover: light-dark(rgba(27,43,68,.08), rgba(255,255,255,.09));
+      --ct-shadow: light-dark(0 12px 32px rgba(29,43,65,.16), 0 15px 38px rgba(0,0,0,.38));
+      color: var(--ct-text);
+      font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      width: 100%;
+    }
+    #codex-taskbar-proposal * { box-sizing: border-box; }
+    #codex-taskbar-proposal .ct-caption {
+      margin: 0 0 8px 2px;
+      color: var(--ct-muted);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: .01em;
+    }
+    #codex-taskbar-proposal .ct-scene {
+      position: relative;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--ct-line);
+      border-radius: 16px;
+      background:
+        radial-gradient(circle at 18% 25%, light-dark(rgba(255,255,255,.88), rgba(90,124,177,.18)) 0 8%, transparent 30%),
+        linear-gradient(135deg, var(--ct-wall-a), var(--ct-wall-b));
+      box-shadow: var(--ct-shadow);
+    }
+    #codex-taskbar-proposal .ct-workspace {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(245px, 292px);
+      justify-content: space-between;
+      align-items: start;
+      gap: 24px;
+      min-height: 236px;
+      padding: 20px 20px 72px;
+    }
+    #codex-taskbar-proposal .ct-desktop-widget {
+      width: 100%;
+      padding: 16px;
+      border: 1px solid var(--ct-line);
+      border-radius: 14px;
+      background: var(--ct-surface);
+      box-shadow: var(--ct-shadow);
+      backdrop-filter: blur(18px);
+    }
+    #codex-taskbar-proposal .ct-desktop-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 15px;
+    }
+    #codex-taskbar-proposal .ct-brand-mark {
+      display: grid;
+      place-items: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: var(--ct-text);
+      color: var(--ct-surface-solid);
+    }
+    #codex-taskbar-proposal .ct-codex-glyph {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      background: currentColor;
+      -webkit-mask: url("data:image/svg+xml;base64,PHN2ZyBmaWxsPSJjdXJyZW50Q29sb3IiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSIxZW0iIHN0eWxlPSJmbGV4Om5vbmU7bGluZS1oZWlnaHQ6MSIgdmlld0JveD0iMCAwIDI0IDI0IiB3aWR0aD0iMWVtIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjx0aXRsZT5Db2RleDwvdGl0bGU+PHBhdGggY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNOC4wODYuNDU3YTYuMTA1IDYuMTA1IDAgMDEzLjA0Ni0uNDE1YzEuMzMzLjE1MyAyLjUyMS43MiAzLjU2NCAxLjdhLjExNy4xMTcgMCAwMC4xMDcuMDI5YzEuNDA4LS4zNDYgMi43NjItLjIyNCA0LjA2MS4zNjZsLjA2My4wMy4xNTQuMDc2YzEuMzU3LjcwMyAyLjMzIDEuNzcgMi45MTggMy4xOTguMjc4LjY3OS40MTggMS4zODguNDIxIDIuMTI2YTUuNjU1IDUuNjU1IDAgMDEtLjE4IDEuNjMxLjE2Ny4xNjcgMCAwMC4wNC4xNTUgNS45ODIgNS45ODIgMCAwMTEuNTc4IDIuODkxYy4zODUgMS45MDEtLjAxIDMuNjE1LTEuMTgzIDUuMTRsLS4xODIuMjJhNi4wNjMgNi4wNjMgMCAwMS0yLjkzNCAxLjg1MS4xNjIuMTYyIDAgMDAtLjEwOC4xMDJjLS4yNTUuNzM2LS41MTEgMS4zNjQtLjk4NyAxLjk5Mi0xLjE5OSAxLjU4Mi0yLjk2MiAyLjQ2Mi00Ljk0OCAyLjQ1MS0xLjU4My0uMDA4LTIuOTg2LS41ODctNC4yMS0xLjczNmEuMTQ1LjE0NSAwIDAwLS4xNC0uMDMyYy0uNTE4LjE2Ny0xLjA0LjE5MS0xLjYwNC4xODVhNS45MjQgNS45MjQgMCAwMS0yLjU5NS0uNjIyIDYuMDU4IDYuMDU4IDAgMDEtMi4xNDYtMS43ODFjLS4yMDMtLjI2OS0uNDA0LS41MjItLjU1MS0uODIxYTcuNzQgNy43NCAwIDAxLS40OTUtMS4yODMgNi4xMSA2LjExIDAgMDEtLjAxNy0zLjA2NC4xNjYuMTY2IDAgMDAuMDA4LS4wNzQuMTE1LjExNSAwIDAwLS4wMzctLjA2NCA1Ljk1OCA1Ljk1OCAwIDAxLTEuMzgtMi4yMDIgNS4xOTYgNS4xOTYgMCAwMS0uMzMzLTEuNTg5IDYuOTE1IDYuOTE1IDAgMDEuMTg4LTIuMTMyYy40NS0xLjQ4NCAxLjMwOS0yLjY0OCAyLjU3Ny0zLjQ5My4yODItLjE4OC41NS0uMzM0LjgwMi0uNDM4LjI4Ni0uMTIuNTczLS4yMi44NjEtLjMwNGEuMTI5LjEyOSAwIDAwLjA4Ny0uMDg3QTYuMDE2IDYuMDE2IDAgMDE1LjYzNSAyLjMxQzYuMzE1IDEuNDY0IDcuMTMyLjg0NiA4LjA4Ni40NTd6bS0uODA0IDcuODVhLjg0OC44NDggMCAwMC0xLjQ3My44NDJsMS42OTQgMi45NjUtMS42ODggMi44NDhhLjg0OS44NDkgMCAwMDEuNDYuODY0bDEuOTQtMy4yNzJhLjg0OS44NDkgMCAwMC4wMDctLjg1NGwtMS45NC0zLjM5M3ptNS40NDYgNi4yNGEuODQ5Ljg0OSAwIDAwMCAxLjY5NWg0Ljg0OGEuODQ5Ljg0OSAwIDAwMC0xLjY5NmgtNC44NDh6Ij48L3BhdGg+PC9zdmc+") center / contain no-repeat;
+      mask: url("data:image/svg+xml;base64,PHN2ZyBmaWxsPSJjdXJyZW50Q29sb3IiIGZpbGwtcnVsZT0iZXZlbm9kZCIgaGVpZ2h0PSIxZW0iIHN0eWxlPSJmbGV4Om5vbmU7bGluZS1oZWlnaHQ6MSIgdmlld0JveD0iMCAwIDI0IDI0IiB3aWR0aD0iMWVtIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjx0aXRsZT5Db2RleDwvdGl0bGU+PHBhdGggY2xpcC1ydWxlPSJldmVub2RkIiBkPSJNOC4wODYuNDU3YTYuMTA1IDYuMTA1IDAgMDEzLjA0Ni0uNDE1YzEuMzMzLjE1MyAyLjUyMS43MiAzLjU2NCAxLjdhLjExNy4xMTcgMCAwMC4xMDcuMDI5YzEuNDA4LS4zNDYgMi43NjItLjIyNCA0LjA2MS4zNjZsLjA2My4wMy4xNTQuMDc2YzEuMzU3LjcwMyAyLjMzIDEuNzcgMi45MTggMy4xOTguMjc4LjY3OS40MTggMS4zODguNDIxIDIuMTI2YTUuNjU1IDUuNjU1IDAgMDEtLjE4IDEuNjMxLjE2Ny4xNjcgMCAwMC4wNC4xNTUgNS45ODIgNS45ODIgMCAwMTEuNTc4IDIuODkxYy4zODUgMS45MDEtLjAxIDMuNjE1LTEuMTgzIDUuMTRsLS4xODIuMjJhNi4wNjMgNi4wNjMgMCAwMS0yLjkzNCAxLjg1MS4xNjIuMTYyIDAgMDAtLjEwOC4xMDJjLS4yNTUuNzM2LS41MTEgMS4zNjQtLjk4NyAxLjk5Mi0xLjE5OSAxLjU4Mi0yLjk2MiAyLjQ2Mi00Ljk0OCAyLjQ1MS0xLjU4My0uMDA4LTIuOTg2LS41ODctNC4yMS0xLjczNmEuMTQ1LjE0NSAwIDAwLS4xNC0uMDMyYy0uNTE4LjE2Ny0xLjA0LjE5MS0xLjYwNC4xODVhNS45MjQgNS45MjQgMCAwMS0yLjU5NS0uNjIyIDYuMDU4IDYuMDU4IDAgMDEtMi4xNDYtMS43ODFjLS4yMDMtLjI2OS0uNDA0LS41MjItLjU1MS0uODIxYTcuNzQgNy43NCAwIDAxLS40OTUtMS4yODMgNi4xMSA2LjExIDAgMDEtLjAxNy0zLjA2NC4xNjYuMTY2IDAgMDAuMDA4LS4wNzQuMTE1LjExNSAwIDAwLS4wMzctLjA2NCA1Ljk1OCA1Ljk1OCAwIDAxLTEuMzgtMi4yMDIgNS4xOTYgNS4xOTYgMCAwMS0uMzMzLTEuNTg5IDYuOTE1IDYuOTE1IDAgMDEuMTg4LTIuMTMyYy40NS0xLjQ4NCAxLjMwOS0yLjY0OCAyLjU3Ny0zLjQ5My4yODItLjE4OC41NS0uMzM0LjgwMi0uNDM4LjI4Ni0uMTIuNTczLS4yMi44NjEtLjMwNGEuMTI5LjEyOSAwIDAwLjA4Ny0uMDg3QTYuMDE2IDYuMDE2IDAgMDE1LjYzNSAyLjMxQzYuMzE1IDEuNDY0IDcuMTMyLjg0NiA4LjA4Ni40NTd6bS0uODA0IDcuODVhLjg0OC44NDggMCAwMC0xLjQ3My44NDJsMS42OTQgMi45NjUtMS42ODggMi44NDhhLjg0OS44NDkgMCAwMDEuNDYuODY0bDEuOTQtMy4yNzJhLjg0OS44NDkgMCAwMC4wMDctLjg1NGwtMS45NC0zLjM5M3ptNS40NDYgNi4yNGEuODQ5Ljg0OSAwIDAwMCAxLjY5NWg0Ljg0OGEuODQ5Ljg0OSAwIDAwMC0xLjY5NmgtNC44NDh6Ij48L3BhdGg+PC9zdmc+") center / contain no-repeat;
+    }
+    #codex-taskbar-proposal .ct-title { font-size: 14px; font-weight: 600; }
+    #codex-taskbar-proposal .ct-plan { margin-left: auto; color: var(--ct-muted); font-size: 12px; }
+    #codex-taskbar-proposal .ct-mini-mode-button {
+      min-height: 28px;
+      margin-left: 2px;
+      padding: 3px 7px;
+      border: 1px solid var(--ct-line);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--ct-muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 11px;
+    }
+    #codex-taskbar-proposal .ct-mini-mode-button:hover { background: var(--ct-hover); color: var(--ct-text); }
+    #codex-taskbar-proposal .ct-desktop-metric + .ct-desktop-metric { margin-top: 13px; }
+    #codex-taskbar-proposal .ct-metric-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+    #codex-taskbar-proposal .ct-metric-value { color: var(--ct-text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    #codex-taskbar-proposal .ct-track { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ct-track); }
+    #codex-taskbar-proposal .ct-fill { display: block; height: 100%; border-radius: inherit; }
+    #codex-taskbar-proposal .ct-fill-green { width: 72%; background: var(--ct-green); }
+    #codex-taskbar-proposal .ct-fill-amber { width: 38%; background: var(--ct-amber); }
+    #codex-taskbar-proposal .ct-mini-strip { display: none; align-items: center; gap: 8px; width: 100%; min-height: 30px; }
+    #codex-taskbar-proposal .ct-mini-strip > .ct-codex-glyph { width: 14px; height: 14px; }
+    #codex-taskbar-proposal .ct-mini-meter { display: grid; grid-template-columns: 22px 25px 25px; align-items: center; gap: 3px; min-width: 0; font-size: 11px; }
+    #codex-taskbar-proposal .ct-mini-meter .ct-track { height: 4px; }
+    #codex-taskbar-proposal .ct-mini-label { color: var(--ct-muted); white-space: nowrap; }
+    #codex-taskbar-proposal .ct-mini-value { justify-self: end; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    #codex-taskbar-proposal .ct-mini-restore { display: grid; place-items: center; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ct-muted); cursor: pointer; }
+    #codex-taskbar-proposal .ct-mini-restore:hover { background: var(--ct-hover); color: var(--ct-text); }
+    #codex-taskbar-proposal .ct-mini-restore svg { width: 14px; height: 14px; }
+    #codex-taskbar-proposal .ct-desktop-widget.ct-is-mini {
+      width: 244px;
+      padding: 7px 8px;
+      border-color: transparent;
+      border-radius: 10px;
+      background: light-dark(rgba(255,255,255,.58), rgba(20,27,39,.58));
+      box-shadow: 0 5px 18px light-dark(rgba(29,43,65,.10), rgba(0,0,0,.22));
+    }
+    #codex-taskbar-proposal .ct-desktop-widget.ct-is-mini .ct-desktop-head,
+    #codex-taskbar-proposal .ct-desktop-widget.ct-is-mini .ct-desktop-metric { display: none; }
+    #codex-taskbar-proposal .ct-desktop-widget.ct-is-mini .ct-mini-strip { display: flex; }
+    #codex-taskbar-proposal .ct-tray-menu {
+      width: 100%;
+      padding: 7px;
+      border: 1px solid var(--ct-line);
+      border-radius: 12px;
+      background: var(--ct-surface-solid);
+      box-shadow: var(--ct-shadow);
+    }
+    #codex-taskbar-proposal .ct-menu-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px 9px;
+      color: var(--ct-muted);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #codex-taskbar-proposal .ct-menu-title .ct-codex-glyph { width: 15px; height: 15px; }
+    #codex-taskbar-proposal .ct-menu-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 7px 9px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    #codex-taskbar-proposal .ct-menu-option:hover { background: var(--ct-hover); }
+    #codex-taskbar-proposal .ct-menu-option input { width: 16px; height: 16px; margin: 0; accent-color: var(--ct-green); }
+    #codex-taskbar-proposal .ct-menu-sep { height: 1px; margin: 5px 9px; background: var(--ct-line); }
+    #codex-taskbar-proposal .ct-menu-note { padding: 6px 10px 8px; color: var(--ct-muted); font-size: 11px; }
+    #codex-taskbar-proposal .ct-taskbar {
+      position: absolute;
+      inset: auto 0 0;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      height: 54px;
+      padding: 3px 9px;
+      border-top: 1px solid var(--ct-line);
+      background: var(--ct-taskbar);
+      backdrop-filter: blur(22px);
+    }
+    #codex-taskbar-proposal .ct-icon-button {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 38px;
+      width: 38px;
+      height: 44px;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--ct-text);
+      cursor: pointer;
+    }
+    #codex-taskbar-proposal .ct-icon-button:hover,
+    #codex-taskbar-proposal .ct-icon-button[aria-expanded="true"] { background: var(--ct-hover); }
+    #codex-taskbar-proposal .ct-icon-button svg { width: 19px; height: 19px; stroke-width: 1.7; }
+    #codex-taskbar-proposal .ct-taskbar-apps { display: flex; align-items: center; gap: 1px; }
+    #codex-taskbar-proposal .ct-taskbar-spacer { flex: 1 1 auto; min-width: 2px; }
+    #codex-taskbar-proposal .ct-usage-button {
+      display: grid;
+      flex: 0 0 154px;
+      width: 154px;
+      height: 46px;
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--ct-text);
+      cursor: pointer;
+      text-align: left;
+    }
+    #codex-taskbar-proposal .ct-usage-button:hover,
+    #codex-taskbar-proposal .ct-usage-button[aria-expanded="true"] { background: var(--ct-hover); }
+    #codex-taskbar-proposal .ct-usage-row {
+      display: grid;
+      grid-template-columns: 31px minmax(42px, 1fr) 36px;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      font-size: 11px;
+      line-height: 17px;
+    }
+    #codex-taskbar-proposal .ct-usage-row .ct-track { height: 4px; }
+    #codex-taskbar-proposal .ct-usage-label { color: var(--ct-muted); white-space: nowrap; }
+    #codex-taskbar-proposal .ct-usage-value { justify-self: end; color: var(--ct-text); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    #codex-taskbar-proposal .ct-tray-cluster { display: flex; align-items: center; flex: 0 0 auto; }
+    #codex-taskbar-proposal .ct-tray-button { position: relative; }
+    #codex-taskbar-proposal .ct-tray-button .ct-codex-glyph { width: 19px; height: 19px; }
+    #codex-taskbar-proposal .ct-tray-button::after {
+      content: "";
+      position: absolute;
+      right: 7px;
+      bottom: 7px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--ct-green);
+    }
+    #codex-taskbar-proposal .ct-status-icons { display: flex; align-items: center; gap: 5px; padding: 0 5px; color: var(--ct-muted); }
+    #codex-taskbar-proposal .ct-status-icons svg { width: 14px; height: 14px; }
+    #codex-taskbar-proposal .ct-clock { min-width: 57px; text-align: center; font-size: 11px; font-variant-numeric: tabular-nums; }
+    #codex-taskbar-proposal .ct-detail-popup {
+      position: absolute;
+      right: 87px;
+      bottom: 62px;
+      z-index: 4;
+      width: 254px;
+      padding: 13px;
+      border: 1px solid var(--ct-line);
+      border-radius: 12px;
+      background: var(--ct-surface-solid);
+      box-shadow: var(--ct-shadow);
+    }
+    #codex-taskbar-proposal .ct-detail-popup[hidden] { display: none; }
+    #codex-taskbar-proposal .ct-detail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13px; font-weight: 600; }
+    #codex-taskbar-proposal .ct-detail-close { width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ct-muted); cursor: pointer; }
+    #codex-taskbar-proposal .ct-detail-close:hover { background: var(--ct-hover); }
+    #codex-taskbar-proposal .ct-detail-close svg { width: 15px; height: 15px; }
+    #codex-taskbar-proposal .ct-detail-item { display: grid; grid-template-columns: 8px 42px 1fr auto; align-items: center; gap: 9px; padding: 5px 0; font-size: 12px; }
+    #codex-taskbar-proposal .ct-dot { width: 8px; height: 8px; border-radius: 50%; }
+    #codex-taskbar-proposal .ct-dot-green { background: var(--ct-green); }
+    #codex-taskbar-proposal .ct-dot-amber { background: var(--ct-amber); }
+    #codex-taskbar-proposal .ct-detail-label { color: var(--ct-muted); }
+    #codex-taskbar-proposal .ct-detail-reset { color: var(--ct-muted); font-size: 11px; white-space: nowrap; }
+    #codex-taskbar-proposal .ct-detail-value { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+    #codex-taskbar-proposal[data-layout="columns"] .ct-usage-button { grid-template-columns: 1fr 1fr; gap: 8px; padding-inline: 9px; }
+    #codex-taskbar-proposal[data-layout="columns"] .ct-usage-row { grid-template-columns: 1fr auto; grid-template-rows: 17px 4px; gap: 0 5px; }
+    #codex-taskbar-proposal[data-layout="columns"] .ct-usage-row .ct-track { grid-column: 1 / -1; }
+    #codex-taskbar-proposal[data-layout="columns"] .ct-usage-value { font-size: 12px; }
+    #codex-taskbar-proposal[data-layout="numbers"] .ct-usage-button { grid-template-columns: 1fr 1fr; gap: 10px; padding-inline: 10px; }
+    #codex-taskbar-proposal[data-layout="numbers"] .ct-usage-row { grid-template-columns: 1fr; justify-items: center; gap: 0; }
+    #codex-taskbar-proposal[data-layout="numbers"] .ct-usage-row .ct-track { display: none; }
+    #codex-taskbar-proposal[data-layout="numbers"] .ct-usage-value { grid-row: 1; justify-self: center; font-size: 15px; }
+    #codex-taskbar-proposal[data-layout="numbers"] .ct-usage-label { grid-row: 2; }
+    #codex-taskbar-proposal[data-single-window="true"] .ct-five-hour { display: none; }
+    #codex-taskbar-proposal[data-single-window="true"] .ct-usage-button { display: flex; align-items: center; }
+    #codex-taskbar-proposal[data-single-window="true"] .ct-usage-row { width: 100%; }
+    #codex-taskbar-proposal .ct-hidden { display: none !important; }
+    @media (max-width: 540px) {
+      #codex-taskbar-proposal .ct-workspace { grid-template-columns: 1fr; gap: 12px; min-height: 386px; padding: 14px 14px 68px; }
+      #codex-taskbar-proposal .ct-desktop-widget { max-width: 100%; }
+      #codex-taskbar-proposal .ct-tray-menu { max-width: 100%; }
+      #codex-taskbar-proposal .ct-taskbar { padding-inline: 5px; gap: 1px; }
+      #codex-taskbar-proposal .ct-taskbar-apps .ct-icon-button:nth-child(n+2) { display: none; }
+      #codex-taskbar-proposal .ct-status-icons { display: none; }
+      #codex-taskbar-proposal .ct-usage-button { flex-basis: 148px; width: 148px; padding-inline: 6px; }
+      #codex-taskbar-proposal .ct-icon-button { flex-basis: 36px; width: 36px; }
+      #codex-taskbar-proposal .ct-clock { min-width: 43px; font-size: 10px; }
+      #codex-taskbar-proposal .ct-detail-popup { right: 48px; width: min(254px, calc(100% - 64px)); }
+    }
+  </style>
+
+  <p class="ct-caption">표시 동작 시안 · 예시 데이터</p>
+  <section class="ct-scene" aria-label="Windows 작업표시줄 Codex 사용량 표시 시안">
+    <div class="ct-workspace">
+      <article class="ct-desktop-widget" aria-label="바탕화면 Codex 사용량 위젯">
+        <div class="ct-desktop-head">
+          <span class="ct-brand-mark" aria-hidden="true"><span class="ct-codex-glyph"></span></span>
+          <span class="ct-title">Codex</span>
+          <span class="ct-plan">Plus</span>
+          <button class="ct-mini-mode-button" id="ct-mini-mode-button" type="button">미니 모드</button>
+        </div>
+        <div class="ct-desktop-metric ct-five-hour">
+          <div class="ct-metric-line"><span>5시간 한도</span><span class="ct-metric-value">72% 남음</span></div>
+          <div class="ct-track" role="progressbar" aria-label="5시간 남은 한도 72%" aria-valuenow="72" aria-valuemin="0" aria-valuemax="100"><span class="ct-fill ct-fill-green"></span></div>
+        </div>
+        <div class="ct-desktop-metric">
+          <div class="ct-metric-line"><span>주간 한도</span><span class="ct-metric-value">38% 남음</span></div>
+          <div class="ct-track" role="progressbar" aria-label="주간 남은 한도 38%" aria-valuenow="38" aria-valuemin="0" aria-valuemax="100"><span class="ct-fill ct-fill-amber"></span></div>
+        </div>
+        <div class="ct-mini-strip" aria-label="바탕화면 미니 위젯">
+          <span class="ct-codex-glyph" aria-hidden="true"></span>
+          <span class="ct-mini-meter ct-five-hour"><span class="ct-mini-label">5h</span><span class="ct-track"><span class="ct-fill ct-fill-green"></span></span><span class="ct-mini-value">72%</span></span>
+          <span class="ct-mini-meter"><span class="ct-mini-label">주간</span><span class="ct-track"><span class="ct-fill ct-fill-amber"></span></span><span class="ct-mini-value">38%</span></span>
+          <button class="ct-mini-restore" id="ct-mini-restore" type="button" aria-label="일반 모드로 복원"><i data-lucide="maximize-2" aria-hidden="true"></i></button>
+        </div>
+      </article>
+
+      <div class="ct-tray-menu" role="group" aria-label="Codex 트레이 메뉴">
+        <div class="ct-menu-title"><span class="ct-codex-glyph" aria-hidden="true"></span><span>Codex 사용량</span></div>
+        <label class="ct-menu-option"><input id="ct-desktop-toggle" type="checkbox" checked><span>바탕화면 위젯 표시</span></label>
+        <label class="ct-menu-option"><input id="ct-mini-toggle" type="checkbox"><span>바탕화면 미니 모드</span></label>
+        <label class="ct-menu-option"><input id="ct-taskbar-toggle" type="checkbox" checked><span>작업표시줄 위젯 표시</span></label>
+        <div class="ct-menu-sep"></div>
+        <div class="ct-menu-note" aria-live="polite">두 위치에 표시 중</div>
+      </div>
+    </div>
+
+    <div class="ct-detail-popup" id="ct-detail-popup" role="dialog" aria-label="Codex 남은 한도 상세" hidden>
+      <div class="ct-detail-head"><span>남은 한도</span><button class="ct-detail-close" id="ct-detail-close" type="button" aria-label="상세 닫기"><i data-lucide="x" aria-hidden="true"></i></button></div>
+      <div class="ct-detail-item ct-five-hour"><span class="ct-dot ct-dot-green"></span><span class="ct-detail-label">5시간</span><span class="ct-detail-reset">2시간 14분 후 초기화</span><span class="ct-detail-value">72%</span></div>
+      <div class="ct-detail-item"><span class="ct-dot ct-dot-amber"></span><span class="ct-detail-label">주간</span><span class="ct-detail-reset">3일 6시간 후 초기화</span><span class="ct-detail-value">38%</span></div>
+    </div>
+
+    <nav class="ct-taskbar" aria-label="Windows 작업표시줄">
+      <div class="ct-taskbar-apps" aria-label="고정 앱">
+        <button class="ct-icon-button" type="button" aria-label="시작"><i data-lucide="layout-grid" aria-hidden="true"></i></button>
+        <button class="ct-icon-button" type="button" aria-label="검색"><i data-lucide="search" aria-hidden="true"></i></button>
+        <button class="ct-icon-button" type="button" aria-label="파일 탐색기"><i data-lucide="folder" aria-hidden="true"></i></button>
+      </div>
+      <div class="ct-taskbar-spacer"></div>
+      <button class="ct-usage-button" id="ct-usage-button" type="button" aria-label="Codex 남은 한도. 5시간 72%, 주간 38%. 상세 열기" aria-expanded="false" aria-controls="ct-detail-popup">
+        <span class="ct-usage-row ct-five-hour"><span class="ct-usage-label">5h</span><span class="ct-track"><span class="ct-fill ct-fill-green"></span></span><span class="ct-usage-value">72%</span></span>
+        <span class="ct-usage-row"><span class="ct-usage-label">주간</span><span class="ct-track"><span class="ct-fill ct-fill-amber"></span></span><span class="ct-usage-value">38%</span></span>
+      </button>
+      <div class="ct-tray-cluster">
+        <button class="ct-icon-button ct-tray-button" id="ct-tray-button" type="button" aria-label="Codex 트레이 메뉴 열기" aria-expanded="true"><span class="ct-codex-glyph" aria-hidden="true"></span></button>
+        <div class="ct-status-icons" aria-hidden="true"><i data-lucide="wifi"></i><i data-lucide="volume-2"></i></div>
+        <div class="ct-clock" aria-label="오후 2시 31분">오후 2:31</div>
+      </div>
+    </nav>
+  </section>
+
+  <script>
+    (() => {
+      const root = document.getElementById('codex-taskbar-proposal');
+      const desktopToggle = root.querySelector('#ct-desktop-toggle');
+      const taskbarToggle = root.querySelector('#ct-taskbar-toggle');
+      const miniToggle = root.querySelector('#ct-mini-toggle');
+      const desktopWidget = root.querySelector('.ct-desktop-widget');
+      const miniModeButton = root.querySelector('#ct-mini-mode-button');
+      const miniRestore = root.querySelector('#ct-mini-restore');
+      const taskbarWidget = root.querySelector('#ct-usage-button');
+      const trayMenu = root.querySelector('.ct-tray-menu');
+      const trayButton = root.querySelector('#ct-tray-button');
+      const detail = root.querySelector('#ct-detail-popup');
+      const detailClose = root.querySelector('#ct-detail-close');
+      const menuNote = root.querySelector('.ct-menu-note');
+      const design = { layout: 'rows', singleWindow: false };
+
+      function renderDesign() {
+        root.dataset.layout = design.layout;
+        root.dataset.singleWindow = String(design.singleWindow);
+        const taskbarLabel = design.singleWindow
+          ? 'Codex 남은 한도. 주간 38%. 상세 열기'
+          : 'Codex 남은 한도. 5시간 72%, 주간 38%. 상세 열기';
+        taskbarWidget.setAttribute('aria-label', taskbarLabel);
+      }
+
+      function renderVisibility() {
+        desktopWidget.classList.toggle('ct-hidden', !desktopToggle.checked);
+        taskbarWidget.classList.toggle('ct-hidden', !taskbarToggle.checked);
+        if (!taskbarToggle.checked) {
+          detail.hidden = true;
+          taskbarWidget.setAttribute('aria-expanded', 'false');
+        }
+        menuNote.textContent = desktopToggle.checked && taskbarToggle.checked
+          ? '두 위치에 표시 중'
+          : desktopToggle.checked
+            ? '바탕화면에만 표시 중'
+            : taskbarToggle.checked
+              ? '작업표시줄에만 표시 중'
+              : '트레이에서 다시 표시할 수 있음';
+      }
+
+      function setMiniMode(mini) {
+        miniToggle.checked = mini;
+        desktopWidget.classList.toggle('ct-is-mini', mini);
+        desktopWidget.setAttribute('aria-label', mini ? '바탕화면 Codex 사용량 미니 위젯' : '바탕화면 Codex 사용량 위젯');
+      }
+
+      function setMenu(open) {
+        trayMenu.classList.toggle('ct-hidden', !open);
+        trayButton.setAttribute('aria-expanded', String(open));
+      }
+
+      desktopToggle.addEventListener('change', renderVisibility);
+      taskbarToggle.addEventListener('change', renderVisibility);
+      miniToggle.addEventListener('change', () => setMiniMode(miniToggle.checked));
+      miniModeButton.addEventListener('click', () => setMiniMode(true));
+      miniRestore.addEventListener('click', () => setMiniMode(false));
+      desktopWidget.addEventListener('dblclick', () => {
+        if (miniToggle.checked) setMiniMode(false);
+      });
+      trayButton.addEventListener('click', () => {
+        const willOpen = trayMenu.classList.contains('ct-hidden');
+        if (willOpen) {
+          detail.hidden = true;
+          taskbarWidget.setAttribute('aria-expanded', 'false');
+        }
+        setMenu(willOpen);
+      });
+      taskbarWidget.addEventListener('click', () => {
+        setMenu(false);
+        detail.hidden = !detail.hidden;
+        taskbarWidget.setAttribute('aria-expanded', String(!detail.hidden));
+      });
+      detailClose.addEventListener('click', () => {
+        detail.hidden = true;
+        taskbarWidget.setAttribute('aria-expanded', 'false');
+        taskbarWidget.focus();
+      });
+
+      renderDesign();
+      renderVisibility();
+
+      if (globalThis.Tweak) {
+        const tweak = new Tweak({ container: root.querySelector('.ct-scene'), onChange: renderDesign });
+        tweak.addSelect(design, 'layout', {
+          label: '작업표시줄 표시 방식',
+          reference: 'taskbar.layout',
+          options: [
+            { label: '2행 막대형 · 추천', value: 'rows' },
+            { label: '가로 2칸형', value: 'columns' },
+            { label: '숫자형', value: 'numbers' }
+          ]
+        });
+        tweak.addToggle(design, 'singleWindow', { label: '주간 한도만 있는 계정', reference: 'account.single_window' });
+      }
+    })();
+  </script>
+</div>

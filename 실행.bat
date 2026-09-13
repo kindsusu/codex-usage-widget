@@ -13,7 +13,7 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHONW=pythonw.exe"
 )
 
-"%PYTHON%" -c "import PIL, pystray" >nul 2>&1 || goto :missing_dependencies
+"%PYTHON%" -c "import comtypes, PIL, pystray" >nul 2>&1 || goto :missing_dependencies
 start "" /b "%PYTHONW%" "%~dp0widget.pyw"
 exit /b 0
 

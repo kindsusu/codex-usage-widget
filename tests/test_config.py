@@ -140,6 +140,8 @@ def test_widget_config_rejects_wrong_runtime_types_and_non_finite_numbers(
         ('WidgetConfig(theme="dark")', "theme"),
         ("WidgetConfig(mini_mode=1)", "mini_mode"),
         ("WidgetConfig(smart_topmost=1)", "smart_topmost"),
+        ("WidgetConfig(desktop_visible=1)", "desktop_visible"),
+        ("WidgetConfig(taskbar_visible=1)", "taskbar_visible"),
     ],
 )
 def test_widget_config_direct_construction_requires_exact_closed_types(
@@ -184,6 +186,8 @@ def test_load_config_merges_valid_fields_and_rejects_wrong_types(
                 "scale": 1.5,
                 "mini_mode": True,
                 "smart_topmost": False,
+                "desktop_visible": False,
+                "taskbar_visible": True,
                 "pet": "image (10)",
                 "refresh_seconds": 240,
                 "position": {"x": -900, "y": 140},
@@ -201,6 +205,8 @@ def test_load_config_merges_valid_fields_and_rejects_wrong_types(
     assert config.scale == 1.5
     assert config.mini_mode is True
     assert config.smart_topmost is False
+    assert config.desktop_visible is False
+    assert config.taskbar_visible is True
     assert config.pet == "image (10)"
     assert config.refresh_seconds == 240
     assert config.position == WindowPosition(x=-900, y=140)
@@ -234,6 +240,8 @@ def test_save_config_uses_atomic_replace_and_only_safe_fields(
         scale=1.3,
         mini_mode=True,
         smart_topmost=False,
+        desktop_visible=False,
+        taskbar_visible=False,
         pet="image (10)",
         refresh_seconds=300,
         position=WindowPosition(x=10, y=20),
@@ -260,6 +268,64 @@ def test_save_config_uses_atomic_replace_and_only_safe_fields(
     assert "email" not in serialized
     assert "account" not in serialized
     assert not replaced[0][0].exists()
+
+
+@pytest.mark.parametrize(
+    ("desktop_visible", "taskbar_visible"),
+    [(True, True), (True, False), (False, True), (False, False)],
+)
+def test_save_and_load_round_trip_every_visibility_combination(
+    tmp_path: Path,
+    desktop_visible: bool,
+    taskbar_visible: bool,
+) -> None:
+    path = tmp_path / "widget_config.json"
+    config = WidgetConfig(
+        desktop_visible=desktop_visible,
+        taskbar_visible=taskbar_visible,
+    )
+
+    save_config(path, config)
+
+    assert load_config(path) == config
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("desktop_visible", "false"),
+        ("desktop_visible", 0),
+        ("taskbar_visible", "true"),
+        ("taskbar_visible", 1),
+    ],
+)
+def test_load_visibility_fields_recover_from_invalid_types(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    path = tmp_path / "widget_config.json"
+    _ = path.write_text(json.dumps({field: value}), encoding="utf-8")
+
+    config = load_config(path)
+
+    assert config.desktop_visible is True
+    assert config.taskbar_visible is True
+
+
+def test_load_legacy_config_defaults_missing_visibility_fields(tmp_path: Path) -> None:
+    path = tmp_path / "widget_config.json"
+    _ = path.write_text(
+        json.dumps({"mini_mode": True, "position": {"x": -12, "y": 34}}),
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.desktop_visible is True
+    assert config.taskbar_visible is True
+    assert config.mini_mode is True
+    assert config.position == WindowPosition(x=-12, y=34)
 
 
 def test_save_config_wraps_parent_creation_failure(
