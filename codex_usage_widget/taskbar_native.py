@@ -56,6 +56,9 @@ SWP_FRAMECHANGED: Final = 0x0020
 SPI_GETHIGHCONTRAST: Final = 0x0042
 HCF_HIGHCONTRASTON: Final = 0x1
 _TIMER_MS: Final = 1_500
+# Embedded usage strips (ours and the Claude widget's) register per-instance
+# class names, so siblings are recognized by prefix.
+SIBLING_CLASS_PREFIXES: Final = ("CodexUsageTaskbar", "ClaudeUsageTaskbarSurface")
 _COINIT_MULTITHREADED: Final = 0
 _RPC_E_CHANGED_MODE: Final = -2_147_417_850
 _TME_LEAVE: Final = 0x2
@@ -554,7 +557,7 @@ class NativeTaskbarHost:
 
     def _observe_once(self, hwnd: int, stop_event: Event, generation: int) -> bool:
         try:
-            target = _find_target()
+            target = _find_target(hwnd)
         except Exception:  # noqa: BLE001
             target = None
         if stop_event.is_set():
@@ -752,7 +755,7 @@ def update_layered_bitmap(hwnd: int, image: Image.Image) -> None:
         _ = user32.ReleaseDC(None, screen_dc)
 
 
-def _find_target() -> _Target | None:
+def _find_target(own_hwnd: int) -> _Target | None:
     user32 = _user32()
     taskbar = int(user32.FindWindowW("Shell_TrayWnd", None) or 0)
     if not taskbar:
@@ -770,10 +773,12 @@ def _find_target() -> _Target | None:
     )
     if not task_buttons:
         return None
+    # The Claude usage strip prefers the same left-hand gap, and UIA reports it
+    # as a pane rather than a button, so sweep the sibling surfaces directly.
+    siblings = sibling_surface_rects(taskbar, own_hwnd)
+    regions = tuple(region for _, region in occupied_regions) + siblings
     interactive_before_notification = tuple(
-        region
-        for _, region in occupied_regions
-        if region.left < notification.left
+        region for region in regions if region.left < notification.left
     )
     dpi = max(96, int(user32.GetDpiForWindow(taskbar) or 96))
     result = place_taskbar_widget(
@@ -781,13 +786,35 @@ def _find_target() -> _Target | None:
             bounds,
             notification,
             _union_rects(interactive_before_notification),
-            tuple(region for _, region in occupied_regions),
+            regions,
+            siblings,
         ),
         dpi=dpi,
     )
     if result.rect is None:
         return None
     return _Target(taskbar, bounds, result.rect, dpi)
+
+
+def sibling_surface_rects(taskbar: int, own_hwnd: int) -> tuple[Rect, ...]:
+    """Rects of the other embedded usage strips, which must not be covered."""
+    user32 = _user32()
+    found: list[Rect] = []
+    enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @enum_proc_type
+    def visit(hwnd: int, _: int) -> bool:
+        if hwnd != own_hwnd:
+            name = ctypes.create_unicode_buffer(128)
+            _ = user32.GetClassNameW(hwnd, name, len(name))
+            if name.value.startswith(SIBLING_CLASS_PREFIXES):
+                rect = _window_rect(hwnd)
+                if rect is not None and rect.width > 0 and rect.height > 0:
+                    found.append(rect)
+        return True
+
+    _ = user32.EnumChildWindows(taskbar, visit, 0)
+    return tuple(found)
 
 
 def _taskbar_occupied_regions(

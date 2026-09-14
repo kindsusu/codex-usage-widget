@@ -66,6 +66,49 @@ class FakeUser32:
         return context
 
 
+class FakeSweepUser32:
+    """Enough of user32 to walk fake taskbar children."""
+
+    def __init__(
+        self, children: dict[int, tuple[str, tuple[int, int, int, int]]]
+    ) -> None:
+        self.children: dict[int, tuple[str, tuple[int, int, int, int]]] = children
+
+    def EnumChildWindows(self, parent: int, proc: object, lparam: int) -> bool:  # noqa: N802
+        del parent, lparam
+        for hwnd in self.children:
+            _ = proc(hwnd, 0)  # pyright: ignore[reportCallIssue]
+        return True
+
+    def GetClassNameW(self, hwnd: int, buffer: object, size: int) -> int:  # noqa: N802
+        del size
+        buffer.value = self.children[hwnd][0]  # pyright: ignore[reportAttributeAccessIssue]
+        return len(self.children[hwnd][0])
+
+    def GetWindowRect(self, hwnd: int, rect: object) -> int:  # noqa: N802
+        native = rect._obj  # pyright: ignore[reportAttributeAccessIssue]
+        native.left, native.top, native.right, native.bottom = self.children[hwnd][1]
+        return 1
+
+
+def test_sibling_usage_strips_are_collected_except_our_own(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user32 = FakeSweepUser32(
+        {
+            11: ("CodexUsageTaskbar_1a2b", (251, 1033, 448, 1079)),
+            12: ("ClaudeUsageTaskbarSurface", (452, 1033, 649, 1079)),
+            13: ("MSTaskListWClass", (0, 1032, 1920, 1080)),
+            14: ("CodexUsageTaskbar_self", (900, 1033, 1097, 1079)),
+        }
+    )
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+
+    rects = taskbar_native.sibling_surface_rects(5, 14)
+
+    assert rects == (Rect(251, 1033, 448, 1079), Rect(452, 1033, 649, 1079))
+
+
 def _ignore_hwnd(_hwnd: int) -> None:
     pass
 
@@ -277,7 +320,10 @@ def test_stopped_observer_does_not_publish_scanned_target(
     host._stop_requested = current_stop
     old_stop.set()
     user32 = FakeUser32()
-    monkeypatch.setattr(taskbar_native, "_find_target", lambda: None)
+    def no_target(_hwnd: int) -> taskbar_native._Target | None:
+        return None
+
+    monkeypatch.setattr(taskbar_native, "_find_target", no_target)
     monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
 
     published = host._observe_once(10, old_stop, 1)
@@ -300,7 +346,7 @@ def test_observer_failure_publishes_none_then_next_scan_recovers(
     )
     scans = iter((RuntimeError(), target))
 
-    def scan() -> taskbar_native._Target:
+    def scan(_hwnd: int) -> taskbar_native._Target:
         value = next(scans)
         if isinstance(value, Exception):
             raise value

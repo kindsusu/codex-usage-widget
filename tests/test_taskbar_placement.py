@@ -6,7 +6,9 @@ from codex_usage_widget.taskbar_placement import (
 )
 
 
-def test_places_widget_only_between_buttons_and_notification() -> None:
+def test_prefers_the_free_run_at_the_reserved_leading_edge() -> None:
+    # 2026-09-14: both usage strips belong at the left of the taskbar, so the
+    # leftmost free run wins and is taken flush with the 200px reserve.
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
@@ -16,11 +18,25 @@ def test_places_widget_only_between_buttons_and_notification() -> None:
     result = place_taskbar_widget(geometry, dpi=96)
 
     assert result.failure is None
-    assert result.rect == Rect(1539, 1001, 1736, 1047)
+    assert result.rect == Rect(200, 1001, 385, 1047)     # 185 wide since 2026-09-14
     assert result.rect is not None
     assert geometry.occupied is not None
-    assert result.rect.left >= geometry.occupied.right
-    assert result.rect.right < geometry.notification.left
+    assert result.rect.right < geometry.occupied.left
+
+
+def test_sits_flush_against_a_sibling_strip_on_the_left() -> None:
+    sibling = Rect(200, 1000, 385, 1048)
+    geometry = TaskbarGeometry(
+        Rect(0, 1000, 1920, 1048),
+        Rect(1740, 1000, 1920, 1048),
+        Rect(200, 1000, 1450, 1048),
+        (sibling, Rect(900, 1000, 1450, 1048)),
+        (sibling,),
+    )
+
+    result = place_taskbar_widget(geometry, dpi=96)
+
+    assert result.rect == Rect(389, 1001, 574, 1047)     # sibling.right + 4px gap
 
 
 def test_narrow_space_fails_instead_of_overlaying() -> None:
@@ -45,10 +61,11 @@ def test_vertical_taskbar_is_rejected() -> None:
 
 
 def test_complete_approved_surface_is_required() -> None:
+    # 136px left of the notification area: less than the full 150px surface.
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
-        Rect(0, 1000, 1540, 1048),
+        Rect(0, 1000, 1600, 1048),
     )
 
     result = place_taskbar_widget(geometry, dpi=96)
@@ -71,7 +88,23 @@ def test_uses_verified_gap_before_start_when_right_side_is_full() -> None:
 
     result = place_taskbar_widget(geometry, dpi=144)
 
-    assert result.rect == Rect(446, 1529, 742, 1598)
+    assert result.rect == Rect(300, 1529, 578, 1598)   # 278 = 185 @ 144dpi
+
+
+def test_sibling_usage_strip_is_not_covered() -> None:
+    sibling = Rect(700, 1000, 897, 1048)
+    geometry = TaskbarGeometry(
+        Rect(0, 1000, 2560, 1048),
+        Rect(2100, 1000, 2560, 1048),
+        Rect(700, 1000, 2000, 1048),
+        (sibling, Rect(900, 1000, 2000, 1048)),
+    )
+
+    result = place_taskbar_widget(geometry, dpi=96)
+
+    assert result.rect is not None
+    assert result.rect.right <= sibling.left
+    assert result.rect.left >= 200
 
 
 def test_negative_monitor_coordinates_do_not_confuse_gap_with_failure() -> None:
@@ -84,4 +117,4 @@ def test_negative_monitor_coordinates_do_not_confuse_gap_with_failure() -> None:
 
     result = place_taskbar_widget(geometry, dpi=96)
 
-    assert result.rect == Rect(-1373, 1001, -1176, 1047)
+    assert result.rect == Rect(-1720, 1001, -1535, 1047)

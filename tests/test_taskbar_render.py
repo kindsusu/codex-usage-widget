@@ -49,6 +49,37 @@ def test_hit_regions_match_approved_menu_gap_and_usage_width_at_each_dpi() -> No
     assert scaled.usage.right == 296
 
 
+def test_bar_is_short_and_colored_by_remaining_percent() -> None:
+    # 2026-09-14: the bar was cut to 80% of its length (59px -> 47px) and the
+    # severity colour carries the reading. 72% remaining is green, 38% amber.
+    image = render_taskbar(_model(), dpi=96, width=185, height=46)
+    bar_left = taskbar_hit_regions(185, 46, 96).usage.left + 45
+
+    green = _color_extent(image, (24, 134, 75))
+    amber = _color_extent(image, (194, 118, 18))
+    track = _color_extent(image, (223, 230, 239))
+    assert green is not None
+    assert amber is not None
+    assert track is not None
+    assert green[0] >= bar_left
+    assert amber[0] >= bar_left
+    # the whole track, fill included, fits in 47px: the old bar ran 59px
+    for extent in (green, amber, track):
+        assert extent[1] <= bar_left + 47, extent
+
+
+def _color_extent(
+    image: Image.Image, rgb: tuple[int, int, int]
+) -> tuple[int, int] | None:
+    xs = [
+        x
+        for y in range(image.height)
+        for x in range(image.width)
+        if image.getpixel((x, y))[:3] == rgb and image.getpixel((x, y))[3] > 200
+    ]
+    return (min(xs), max(xs)) if xs else None
+
+
 def test_light_and_dark_palettes_render_expected_track_and_fill_colors() -> None:
     light = render_taskbar(_model(), dpi=96, width=197, height=46)
     dark = render_taskbar(_model(), dpi=96, width=197, height=46, light_theme=False)

@@ -32,6 +32,9 @@ class TaskbarGeometry:
     notification: Rect
     occupied: Rect | None
     occupied_regions: tuple[Rect, ...] = ()
+    # Sibling usage strips (also inside occupied_regions). A free run that
+    # starts at one of them is where this strip should sit, flush against it.
+    siblings: tuple[Rect, ...] = ()
 
 
 class PlacementFailure(StrEnum):
@@ -58,59 +61,69 @@ def place_taskbar_widget(  # noqa: PLR0913
     geometry: TaskbarGeometry,
     *,
     dpi: int,
-    preferred_width: int = 197,
-    minimum_width: int = 197,
+    # 38 mark + 5 gap + 142 usage block; the usage block lost 12px when the
+    # progress bar was cut to 80% of its length (2026-09-14).
+    preferred_width: int = 185,
+    minimum_width: int = 185,
     maximum_height: int = 46,
     gap: int = 4,
 ) -> PlacementResult:
-    """Choose unused space immediately before the notification area."""
+    """Choose the leftmost free run, falling back to the notification area.
+
+    The user wants both usage strips packed at the left of the taskbar
+    (2026-09-14), so the free runs are swept left to right and the first one
+    that fits wins. A run that begins at the reserved leading edge or at a
+    sibling strip is taken flush with that anchor, which is what puts the two
+    strips side by side; any other run still hugs the obstacle on its right.
+    """
     taskbar = geometry.taskbar
     if taskbar.height > taskbar.width:
         return PlacementResult(None, PlacementFailure.VERTICAL)
     height = min(taskbar.height, logical_pixels(maximum_height, dpi))
     if height < logical_pixels(32, dpi):
         return PlacementResult(None, PlacementFailure.NO_SPACE)
-    right = min(
-        taskbar.right,
-        geometry.notification.left - logical_pixels(gap, dpi),
-    )
-    occupied_right = taskbar.left
-    if geometry.occupied is not None:
-        occupied_right = max(taskbar.left, geometry.occupied.right)
-    available = right - occupied_right
     minimum = logical_pixels(minimum_width, dpi)
     preferred = logical_pixels(preferred_width, dpi)
-    if available >= minimum:
+    scaled_gap = logical_pixels(gap, dpi)
+    # Windows reserves the leading edge for Widgets even when UIA does not
+    # expose a button. Search only gaps after that conservative boundary.
+    leading_reserve = taskbar.left + logical_pixels(200, dpi)
+    source_regions = geometry.occupied_regions
+    if not source_regions and geometry.occupied is not None:
+        source_regions = (geometry.occupied,)
+    regions = tuple(
+        sorted(
+            (
+                region
+                for region in source_regions
+                if region.width > 0 and region.height > 0
+            ),
+            key=lambda region: region.left,
+        )
+    )
+    anchors = {leading_reserve} | {
+        sibling.right + scaled_gap for sibling in geometry.siblings
+    }
+    gap_left = leading_reserve
+    left: int | None = None
+    for region in (*regions, geometry.notification):
+        gap_right = min(taskbar.right, region.left - scaled_gap)
+        if gap_right - gap_left >= preferred:
+            left = gap_left if gap_left in anchors else gap_right - preferred
+            break
+        gap_left = max(gap_left, region.right + scaled_gap)
+    if left is None:
+        # Nothing on the left: squeeze into the run before the tray icons.
+        right = min(taskbar.right, geometry.notification.left - scaled_gap)
+        occupied_right = taskbar.left
+        if geometry.occupied is not None:
+            occupied_right = max(taskbar.left, geometry.occupied.right)
+        available = right - occupied_right
+        if available < minimum:
+            return PlacementResult(None, PlacementFailure.NO_SPACE)
         width = min(preferred, available)
         left = right - width
     else:
-        # Windows reserves the leading edge for Widgets even when UIA does not
-        # expose a button. Search only gaps after that conservative boundary.
-        leading_reserve = taskbar.left + logical_pixels(200, dpi)
-        source_regions = geometry.occupied_regions
-        if not source_regions and geometry.occupied is not None:
-            source_regions = (geometry.occupied,)
-        regions = tuple(
-            sorted(
-                (
-                    region
-                    for region in source_regions
-                    if region.width > 0 and region.height > 0
-                ),
-                key=lambda region: region.left,
-            )
-        )
-        gap_left = leading_reserve
-        left: int | None = None
-        for region in (*regions, geometry.notification):
-            gap_right = min(taskbar.right, region.left - logical_pixels(gap, dpi))
-            if gap_right - gap_left >= preferred:
-                left = gap_right - preferred
-                break
-            gap_left = max(gap_left, region.right + logical_pixels(gap, dpi))
-        if left is None:
-            return PlacementResult(None, PlacementFailure.NO_SPACE)
         width = preferred
-        right = left + width
     top = taskbar.top + max(0, (taskbar.height - height) // 2)
-    return PlacementResult(Rect(left, top, right, top + height))
+    return PlacementResult(Rect(left, top, left + width, top + height))
