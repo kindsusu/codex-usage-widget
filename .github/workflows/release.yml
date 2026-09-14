@@ -37,7 +37,9 @@ jobs:
           match = re.search(r'^__version__\s*:?[^=]*=\s*"([^"]+)"', source, re.M)
           print(project, match.group(1) if match else "")
           PY
-          read -r project package < versions.txt
+          # Python on the Windows runner writes CRLF; strip the CR or the
+          # trailing \r rides along in $package and every comparison fails.
+          read -r project package <<< "$(tr -d '\r' < versions.txt)"
           rm -f versions.txt
           echo "tag=$tag  pyproject=$project  __init__=$package"
           [ "$tag" = "$project" ] && [ "$tag" = "$package" ] || {
