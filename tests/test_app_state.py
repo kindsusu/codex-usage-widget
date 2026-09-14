@@ -69,8 +69,19 @@ def test_toggle_commands_when_invoked_flip_only_their_fields() -> None:
     topmost = toggle_smart_topmost(config)
 
     # Then
-    assert mini == replace(config, mini_mode=True)
+    # a layout switch also un-hides the desktop widget, otherwise the toggle
+    # silently resizes a hidden window and the user sees nothing happen
+    assert mini == replace(config, mini_mode=True, desktop_visible=True)
     assert topmost == replace(config, smart_topmost=False)
+
+
+def test_mini_toggle_reveals_a_hidden_desktop_widget() -> None:
+    hidden = WidgetConfig(mini_mode=True, desktop_visible=False)
+
+    shown = toggle_mini_mode(hidden)
+
+    assert shown.mini_mode is False
+    assert shown.desktop_visible is True
 
 
 def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:

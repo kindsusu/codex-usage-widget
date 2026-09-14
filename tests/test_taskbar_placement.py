@@ -18,14 +18,14 @@ def test_prefers_the_free_run_at_the_reserved_leading_edge() -> None:
     result = place_taskbar_widget(geometry, dpi=96)
 
     assert result.failure is None
-    assert result.rect == Rect(200, 1001, 385, 1047)     # 185 wide since 2026-09-14
+    assert result.rect == Rect(200, 1001, 361, 1047)     # shared 161px width
     assert result.rect is not None
     assert geometry.occupied is not None
     assert result.rect.right < geometry.occupied.left
 
 
 def test_sits_flush_against_a_sibling_strip_on_the_left() -> None:
-    sibling = Rect(200, 1000, 385, 1048)
+    sibling = Rect(200, 1000, 361, 1048)
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
@@ -36,7 +36,7 @@ def test_sits_flush_against_a_sibling_strip_on_the_left() -> None:
 
     result = place_taskbar_widget(geometry, dpi=96)
 
-    assert result.rect == Rect(389, 1001, 574, 1047)     # sibling.right + 4px gap
+    assert result.rect == Rect(365, 1001, 526, 1047)     # sibling.right + 4px gap
 
 
 def test_narrow_space_fails_instead_of_overlaying() -> None:
@@ -61,7 +61,7 @@ def test_vertical_taskbar_is_rejected() -> None:
 
 
 def test_complete_approved_surface_is_required() -> None:
-    # 136px left of the notification area: less than the full 150px surface.
+    # 136px left of the notification area: less than the full 161px surface.
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
@@ -88,7 +88,7 @@ def test_uses_verified_gap_before_start_when_right_side_is_full() -> None:
 
     result = place_taskbar_widget(geometry, dpi=144)
 
-    assert result.rect == Rect(300, 1529, 578, 1598)   # 278 = 185 @ 144dpi
+    assert result.rect == Rect(300, 1529, 542, 1598)   # 242 = 161 @ 144dpi
 
 
 def test_sibling_usage_strip_is_not_covered() -> None:
@@ -117,4 +117,4 @@ def test_negative_monitor_coordinates_do_not_confuse_gap_with_failure() -> None:
 
     result = place_taskbar_widget(geometry, dpi=96)
 
-    assert result.rect == Rect(-1720, 1001, -1535, 1047)
+    assert result.rect == Rect(-1720, 1001, -1559, 1047)

@@ -53,8 +53,16 @@ def set_pet(config: WidgetConfig, pet: str) -> WidgetConfig:
 
 
 def toggle_mini_mode(config: WidgetConfig) -> WidgetConfig:
-    """Flip between full and compact battery layouts."""
-    return replace(config, mini_mode=not config.mini_mode)
+    """Flip between full and compact battery layouts, and show the widget.
+
+    Switching layout is a request to LOOK at the desktop widget. Without the
+    second half, ticking "바탕화면 미니 모드" while the desktop surface is
+    hidden only flips a checkbox: the window silently changes size behind the
+    scenes and the user sees nothing happen (2026-09-14 bug report).
+    """
+    return replace(
+        config, mini_mode=not config.mini_mode, desktop_visible=True
+    )
 
 
 def toggle_smart_topmost(config: WidgetConfig) -> WidgetConfig:

@@ -20,20 +20,24 @@ if TYPE_CHECKING:
 HoverRegion: TypeAlias = Literal["usage", "menu"]
 _BASE_DPI: Final = 96
 _SUPERSAMPLE: Final = 3
-_MENU_WIDTH: Final = 38
+# SHARED STRIP CONTRACT — identical numbers in the Claude widget (widget.pyw,
+# the _TB_* block). Both strips sit side by side on the taskbar, so a change
+# here must be mirrored there or they stop looking like twins. Padding was
+# trimmed on 2026-09-14 so both fit the free run left of the Start button.
+_MENU_WIDTH: Final = 30
 _MENU_HEIGHT: Final = 44
-_GAP: Final = 5
+_GAP: Final = 4
 # Usage block columns: label | bar | right-aligned %. The bar ran 45..104
 # (59px) until 2026-09-14, when the user asked for 80% of that length; it is
 # now 47px and the severity colour carries the reading. The strip gave up the
 # same 12px.
-_BAR_LEFT: Final = 45
+_BAR_LEFT: Final = 34                   # label column
 _BAR_WIDTH: Final = 47                  # 80% of the old 59
-_PERCENT_WIDTH: Final = 42
-_PAD_RIGHT: Final = 8
+_PERCENT_WIDTH: Final = 42              # widest "57.5%"
+_PAD_RIGHT: Final = 4
 _USAGE_WIDTH: Final = _BAR_LEFT + _BAR_WIDTH + _PERCENT_WIDTH + _PAD_RIGHT
 _HEIGHT: Final = 46
-_MIN_FULL_WIDTH: Final = 113
+_MIN_FULL_WIDTH: Final = 98
 _DANGER_REMAINING: Final = 20
 _WARNING_REMAINING: Final = 50
 _EMPTY_MESSAGES: Final = {

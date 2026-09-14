@@ -33,27 +33,28 @@ def test_transparent_looking_button_interiors_remain_hit_testable() -> None:
 
     assert image.getpixel((4, 23))[3] == 1  # menu button, now on the left
     assert image.getpixel((50, 23))[3] == 1  # usage button, now on the right
-    assert image.getpixel((40, 23))[3] == 0  # five-pixel gap stays click-through
+    assert image.getpixel((32, 23))[3] == 0  # the 4px gap stays click-through
 
 
 def test_hit_regions_match_approved_menu_gap_and_usage_width_at_each_dpi() -> None:
-    assert taskbar_hit_regions(197, 46, 96).menu.left == 0
-    assert taskbar_hit_regions(197, 46, 96).menu.right == 38
-    assert taskbar_hit_regions(197, 46, 96).usage.left == 43
-    assert taskbar_hit_regions(197, 46, 96).usage.right == 197
+    # shared 161px contract: 30 mark + 4 gap + 127 usage block
+    assert taskbar_hit_regions(161, 46, 96).menu.left == 0
+    assert taskbar_hit_regions(161, 46, 96).menu.right == 30
+    assert taskbar_hit_regions(161, 46, 96).usage.left == 34
+    assert taskbar_hit_regions(161, 46, 96).usage.right == 161
 
-    scaled = taskbar_hit_regions(296, 69, 144)
+    scaled = taskbar_hit_regions(242, 69, 144)
     assert scaled.menu.left == 0
-    assert scaled.menu.right == 57
-    assert scaled.usage.left == 65
-    assert scaled.usage.right == 296
+    assert scaled.menu.right == 45
+    assert scaled.usage.left == 51
+    assert scaled.usage.right == 242
 
 
 def test_bar_is_short_and_colored_by_remaining_percent() -> None:
     # 2026-09-14: the bar was cut to 80% of its length (59px -> 47px) and the
     # severity colour carries the reading. 72% remaining is green, 38% amber.
-    image = render_taskbar(_model(), dpi=96, width=185, height=46)
-    bar_left = taskbar_hit_regions(185, 46, 96).usage.left + 45
+    image = render_taskbar(_model(), dpi=96, width=161, height=46)
+    bar_left = taskbar_hit_regions(161, 46, 96).usage.left + 34
 
     green = _color_extent(image, (24, 134, 75))
     amber = _color_extent(image, (194, 118, 18))
@@ -154,7 +155,7 @@ def test_single_row_is_vertically_centered_and_long_error_is_condensed() -> None
 
     alpha = single_image.getchannel("A")
     assert alpha.crop((43, 14, 197, 32)).getbbox() is not None
-    assert error_image.crop((38, 0, 43, 46)).getchannel("A").getextrema() == (0, 0)
+    assert error_image.crop((30, 0, 34, 46)).getchannel("A").getextrema() == (0, 0)
 
 
 def _contains_rgb(image: Image.Image, rgb: tuple[int, int, int]) -> bool:

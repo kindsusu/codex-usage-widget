@@ -61,10 +61,10 @@ def place_taskbar_widget(  # noqa: PLR0913
     geometry: TaskbarGeometry,
     *,
     dpi: int,
-    # 38 mark + 5 gap + 142 usage block; the usage block lost 12px when the
-    # progress bar was cut to 80% of its length (2026-09-14).
-    preferred_width: int = 185,
-    minimum_width: int = 185,
+    # 30 mark + 4 gap + 127 usage block — the shared strip width, identical in
+    # the Claude widget so the two strips render as twins (2026-09-14).
+    preferred_width: int = 161,
+    minimum_width: int = 161,
     maximum_height: int = 46,
     gap: int = 4,
 ) -> PlacementResult:
