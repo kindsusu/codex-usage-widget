@@ -144,3 +144,35 @@
 - 슬라이더 track 전체를 hit box로 처리하고, 팝업 동안 부모 z-order를 동결한다.
 
 실제 입력 점검은 읽기 쉬운 우클릭 메뉴, 단일 투명도 창, 위젯·팝업 우클릭의 기존 창 닫기, 슬라이더 조작, Esc·바깥 클릭·반복 요청 닫기, 표시 패널·상세·메뉴와의 상호 배타성, 미니 150%의 메뉴 글꼴 크기 유지, 저장 테마, 데스크톱 숨김과 smart topmost 상태를 포함한다. 결과는 `popup-final-results.json`에 보관한다.
+
+---
+
+## 12. 릴리스 게이트 자동 업데이트 (2026-09-14)
+
+> **상태: 완료.** 단위 테스트 316개, Ruff, basedpyright 오류 0. `--selftest` 실기 통과, 로컬 페이크 릴리스로 성공 1회·실패 2회 통주.
+
+### 신뢰 모델
+
+배포 단위는 **published GitHub Release 하나뿐**이다. `main` push는 사용자에게 닿지 않는다. 버전 정본은 `codex_usage_widget/__init__.py`의 `__version__`이고, CI가 태그·`pyproject.toml`·`__init__.py` 삼중 일치를 강제한다. 버전 확인은 `github.com/.../releases/latest`의 리다이렉트 대상을 읽는다 — API가 아니므로 IP당 rate limit이 없다.
+
+교체 전에 세 관문을 모두 통과해야 디스크가 바뀐다. 릴리스와 함께 게시된 sha256 일치 → 스테이징 전 파일 `py_compile` → 별도 인터프리터에서 `widget.pyw --selftest` 종료 코드 0. 하나라도 실패하면 실행 중인 설치본은 손대지 않는다.
+
+### 왜 zip 통째 교체인가
+
+- **패키지가 파일 하나가 아니다.** 클로드 위젯은 `widget.pyw` 한 장이라 파일 교체로 끝나지만, 이쪽은 `codex_usage_widget/` 40여 모듈 + `assets/` + `pyproject.toml`이 한 몸이다. 모듈 단위로 내려받으면 반쯤 새 버전인 상태가 생긴다. 배포 단위를 zip 하나로 두면 "전부 바뀌거나 전부 안 바뀌거나"만 존재한다.
+- **`git pull` 방식 기각** — 사용자 PC에 git과 원격 인증을 요구하고, 임의 커밋(게이트를 통과하지 않은 main)이 그대로 실행되며, 로컬 수정과 충돌하면 복구가 사용자 몫이 된다.
+- **`.pyz`(zipapp) 방식 기각** — `assets/`를 `ASSET_ROOT`(리포 루트)에서 경로로 읽고 `pip install -e .`로 의존성을 맞추는 현재 구조와 맞지 않는다. zipapp으로 가려면 자산 로딩과 패키징을 전부 갈아야 한다.
+
+### 롤백과 경계
+
+`codex_usage_widget/`·`widget.pyw`·`assets/`·`pyproject.toml`·`실행.bat`·`THIRD_PARTY_NOTICES.md` 여섯 항목만 교체 대상(`MANAGED_ENTRIES`)이다. 이들을 `.update-backup\`으로 **옮긴 뒤** 새 파일을 놓고, 이어서 `.venv\Scripts\python.exe -m pip install -e . --quiet`를 돌린다(comtypes 추가 같은 의존성 변화 대응). 배치나 pip가 실패하면 백업을 그대로 되돌린다. `widget_config.json`과 `.venv\`는 교체 집합 밖이라 업데이트가 설정과 가상환경을 건드리지 않는다.
+
+zip 항목 이름은 `is_managed_member`로 걸러 낸다 — 절대 경로·드라이브 문자·`..`를 거부하므로 조작된 아카이브가 스테이징 밖으로 쓸 수 없다.
+
+### 코드 배치
+
+- `updater.py` — 순수 함수(버전 비교, 다이제스트 검증, 경로·백업·복원 계획)와 경계(네트워크는 `ReleaseSource` frozen dataclass 뒤, 서브프로세스·파일 이동은 `_` 함수)를 분리했다. 테스트는 페이크 `ReleaseSource`로 네트워크 없이 돈다.
+- `selftest.py` — 전 모듈 import + 핵심 순수 함수 스모크. CI와 업데이터 게이트가 같은 진입점(`widget.pyw --selftest` → `app.main`)을 쓴다.
+- `runtime.py` — 기동 +20초, 이후 12시간 주기. 네트워크·게이트·파일 이동은 데몬 스레드에서 돌고 결과는 `Queue`로 `_poll`에 돌아온다(기존 `RefreshService`·taskbar signal과 같은 패턴, Tk를 다른 스레드에서 만지지 않는다).
+- `menus.py` — "자동 업데이트" 체크와 맨 아래 비활성 "버전 v…" 항목. `BooleanVar`는 기존 규칙대로 반환 튜플에 담아 모달 루프 동안 살려 둔다.
+- 기록은 `update.log`에 버전 태그와 실패 게이트 이름만 남긴다. 예외 메시지에는 경로가 섞일 수 있으므로 타입 이름만 적는다.

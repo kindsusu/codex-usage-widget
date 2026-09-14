@@ -1,0 +1,97 @@
+# Publishing = pushing a tag. A push to main never reaches users; only a
+# release created here does (the widget's updater reads /releases/latest).
+#
+#   1. bump the version in pyproject.toml AND codex_usage_widget/__init__.py
+#   2. git tag v0.3.0 && git push --tags
+#
+# The workflow refuses to publish unless the tag, pyproject, and __init__ all
+# agree, and it runs the same gates the updater applies before swapping itself.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag, pyproject, and __init__ must agree
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          python - <<'PY' > versions.txt
+          import re, tomllib
+          from pathlib import Path
+          project = tomllib.loads(Path("pyproject.toml").read_text("utf-8"))["project"]["version"]
+          source = Path("codex_usage_widget/__init__.py").read_text("utf-8")
+          match = re.search(r'^__version__\s*:?[^=]*=\s*"([^"]+)"', source, re.M)
+          print(project, match.group(1) if match else "")
+          PY
+          read -r project package < versions.txt
+          rm -f versions.txt
+          echo "tag=$tag  pyproject=$project  __init__=$package"
+          [ "$tag" = "$project" ] && [ "$tag" = "$package" ] || {
+            echo "::error::version mismatch between tag, pyproject.toml and __init__.py"
+            exit 1
+          }
+
+      - name: Install
+        shell: bash
+        run: python -m pip install --quiet -e . pytest
+
+      - name: Gate - pytest, py_compile, selftest
+        shell: bash
+        run: |
+          python -m pytest -q
+          python -m compileall -q codex_usage_widget
+          python -m py_compile widget.pyw  # compileall skips the .pyw extension
+          python widget.pyw --selftest
+
+      - name: Build release archive
+        shell: bash
+        run: |
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          entries = [
+              "codex_usage_widget",
+              "widget.pyw",
+              "assets",
+              "pyproject.toml",
+              "실행.bat",
+              "THIRD_PARTY_NOTICES.md",
+          ]
+          with zipfile.ZipFile("codex-usage-widget.zip", "w", zipfile.ZIP_DEFLATED) as bundle:
+              for entry in entries:
+                  path = Path(entry)
+                  if path.is_dir():
+                      for item in sorted(path.rglob("*")):
+                          if item.is_file() and "__pycache__" not in item.parts:
+                              bundle.write(item, item.as_posix())
+                  else:
+                      bundle.write(path, path.as_posix())
+              print("\n".join(bundle.namelist()))
+          PY
+          sha256sum codex-usage-widget.zip | awk '{print $1 "  codex-usage-widget.zip"}' \
+            > codex-usage-widget.zip.sha256
+          cat codex-usage-widget.zip.sha256
+
+      - name: Create GitHub Release with assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            codex-usage-widget.zip codex-usage-widget.zip.sha256 \
+            --title "Codex Usage Widget $GITHUB_REF_NAME" \
+            --generate-notes

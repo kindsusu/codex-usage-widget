@@ -7,10 +7,10 @@ import tkinter as tk
 from datetime import UTC, datetime
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Event
+from threading import Event, Thread
 from typing import TYPE_CHECKING, Final, Literal, TypeAlias, final
 
-from codex_usage_widget import actions, menus, windows
+from codex_usage_widget import actions, menus, updater, windows
 from codex_usage_widget import config as widget_config
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.fetcher import fetch_snapshot
@@ -45,8 +45,10 @@ from codex_usage_widget.window_visibility import apply_native_window_state
 if TYPE_CHECKING:
     from codex_usage_widget.config import WidgetConfig
 
-_CONFIG_PATH: Final = Path(__file__).resolve().parent.parent / "widget_config.json"
+_INSTALL_ROOT: Final = Path(__file__).resolve().parent.parent
+_CONFIG_PATH: Final = _INSTALL_ROOT / "widget_config.json"
 _TASKBAR_RETRY_MS: Final = 10_000
+_UPDATE_RETOGGLE_MS: Final = 3_000
 SignalCommand: TypeAlias = Literal[
     "show",
     "exit",
@@ -81,6 +83,9 @@ class WidgetApplication:
         )
         self._service = RefreshService(fetch_snapshot)
         self._signals: Queue[Signal] = Queue()
+        self._updates: Queue[str | None] = Queue()
+        self._update_after_id: str | None = None
+        self._update_busy = False
         self._taskbar_menu_open = Event()
         self._popup_suspensions: set[str] = set()
         self._drag_origin: tuple[int, int, int, int] | None = None
@@ -141,6 +146,7 @@ class WidgetApplication:
         _ = root.after(200, self._reassert_no_taskbar)
         _ = root.after(self._config.refresh_seconds * 1000, self._periodic_refresh)
         _ = root.after(_TASKBAR_RETRY_MS, self._retry_taskbar)
+        self._schedule_update_check(updater.FIRST_CHECK_MS)
         self._topmost.start()
 
     def _reassert_no_taskbar(self) -> None:
@@ -194,6 +200,7 @@ class WidgetApplication:
         if self._closing:
             return
         self._closing = True
+        self._cancel_update_check()
         self._topmost.stop()
         self._service.shutdown()
         self._details.close()
@@ -215,6 +222,8 @@ class WidgetApplication:
             self._signals.put(("show", 0, 0))
         if self._service.poll() is not None:
             self._render()
+        if self._drain_update_result():
+            return
         while True:
             try:
                 signal = self._signals.get_nowait()
@@ -304,6 +313,53 @@ class WidgetApplication:
             _ = self._taskbar.start()
         self._apply_visibility()
         _ = self._root.after(_TASKBAR_RETRY_MS, self._retry_taskbar)
+
+    def _schedule_update_check(self, delay_ms: int) -> None:
+        """Arm the next release check, unless the user opted out."""
+        self._cancel_update_check()
+        if self._closing or not self._config.auto_update:
+            return
+        self._update_after_id = self._root.after(delay_ms, self._start_update_check)
+
+    def _cancel_update_check(self) -> None:
+        pending = self._update_after_id
+        self._update_after_id = None
+        if pending is not None:
+            self._root.after_cancel(pending)
+
+    def _start_update_check(self) -> None:
+        self._update_after_id = None
+        if self._closing or self._update_busy or not self._config.auto_update:
+            return
+        self._update_busy = True
+        # Network, subprocess gates, and file moves all happen off the Tk
+        # thread; the result comes back through the queue that _poll drains.
+        Thread(target=self._run_update_check, daemon=True).start()
+
+    def _run_update_check(self) -> None:
+        self._updates.put(updater.try_update(root=_INSTALL_ROOT))
+
+    def _drain_update_result(self) -> bool:
+        """Apply one finished update attempt, reporting whether we are leaving."""
+        try:
+            tag = self._updates.get_nowait()
+        except Empty:
+            return False
+        self._update_busy = False
+        if tag is None:
+            self._schedule_update_check(updater.INTERVAL_MS)
+            return False
+        self._restart_into_update()
+        return True
+
+    def _restart_into_update(self) -> None:
+        """Hand over to a fresh process running the newly installed files."""
+        widget_config.save_config(self._config_path, self._config)
+        # Release the singleton BEFORE spawning: the replacement would
+        # otherwise see this still-alive process and exit immediately.
+        windows.release_single_instance()
+        updater.relaunch(_INSTALL_ROOT)
+        self.shutdown()
 
     def _periodic_refresh(self) -> None:
         if self._closing:
@@ -399,6 +455,7 @@ class WidgetApplication:
             self._toggle_desktop_visibility,
             self._toggle_taskbar_visibility,
             self._toggle_topmost,
+            self._toggle_auto_update,
             self.hide,
             self.shutdown,
             self._set_scale,
@@ -462,6 +519,10 @@ class WidgetApplication:
 
     def _toggle_topmost(self) -> None:
         self._save_and_render(actions.toggle_smart_topmost(self._config))
+
+    def _toggle_auto_update(self) -> None:
+        self._save_and_render(actions.toggle_auto_update(self._config))
+        self._schedule_update_check(_UPDATE_RETOGGLE_MS)
 
     def _drag_start(self, event: tk.Event[tk.Misc]) -> None:
         self._drag_origin = (

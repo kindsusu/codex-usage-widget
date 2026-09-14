@@ -80,6 +80,11 @@ def toggle_taskbar_visibility(config: WidgetConfig) -> WidgetConfig:
     return replace(config, taskbar_visible=not config.taskbar_visible)
 
 
+def toggle_auto_update(config: WidgetConfig) -> WidgetConfig:
+    """Flip whether published releases are installed without being asked."""
+    return replace(config, auto_update=not config.auto_update)
+
+
 def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
     """Build the menu's portable labels and checked states."""
     return (

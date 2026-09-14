@@ -10,3 +10,6 @@ dist/
 widget_config.json
 .artifacts/
 screenshots/
+.update-staging/
+.update-backup/
+update.log

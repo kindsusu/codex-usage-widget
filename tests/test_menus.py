@@ -113,6 +113,7 @@ def test_selected_command_remains_alive_until_idle_cleanup(
         noop,
         noop,
         noop,
+        noop,
         lambda _value, _mini: None,
         lambda _name: None,
         noop,

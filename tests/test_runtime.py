@@ -195,6 +195,8 @@ def test_tray_show_reapplies_taskbar_style_and_window_layer(
     monkeypatch.setattr(application, "_root", root, raising=False)
     monkeypatch.setattr(application, "_service", _PollService(), raising=False)
     monkeypatch.setattr(application, "_signals", signals, raising=False)
+    updates: Queue[str | None] = Queue()
+    monkeypatch.setattr(application, "_updates", updates, raising=False)
     monkeypatch.setattr(application, "_tray", _PollTray(), raising=False)
     monkeypatch.setattr(application, "_taskbar", _PollTaskbar(), raising=False)
     monkeypatch.setattr(application, "_config", WidgetConfig(), raising=False)
@@ -312,6 +314,8 @@ def test_poll_reschedules_before_modal_menu_dispatch(
     monkeypatch.setattr(application, "_root", root, raising=False)
     monkeypatch.setattr(application, "_service", _PollService(), raising=False)
     monkeypatch.setattr(application, "_signals", signals, raising=False)
+    updates: Queue[str | None] = Queue()
+    monkeypatch.setattr(application, "_updates", updates, raising=False)
     monkeypatch.setattr(application, "_apply_visibility", lambda: None)
     def record_after(_ms: int, _callback: Callable[[], None]) -> None:
         sequence.append("after")
@@ -353,6 +357,8 @@ def test_poll_does_not_touch_destroyed_root_after_modal_exit(
     monkeypatch.setattr(application, "_root", root, raising=False)
     monkeypatch.setattr(application, "_service", _PollService(), raising=False)
     monkeypatch.setattr(application, "_signals", signals, raising=False)
+    updates: Queue[str | None] = Queue()
+    monkeypatch.setattr(application, "_updates", updates, raising=False)
     monkeypatch.setattr(application, "_handle_signal", close_from_menu)
     monkeypatch.setattr(application, "_apply_visibility", apply_visibility)
 
@@ -368,6 +374,8 @@ def test_taskbar_menu_click_snapshots_open_state_before_tk_dispatch(
     signals: Queue[runtime.Signal] = Queue()
     menu_open = Event()
     monkeypatch.setattr(application, "_signals", signals, raising=False)
+    updates: Queue[str | None] = Queue()
+    monkeypatch.setattr(application, "_updates", updates, raising=False)
     monkeypatch.setattr(application, "_taskbar_menu_open", menu_open, raising=False)
 
     application._queue_taskbar_menu(10, 20)

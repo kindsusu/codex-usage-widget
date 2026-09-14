@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
+from codex_usage_widget import __version__
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import ThemeName, WidgetConfig
 from codex_usage_widget.taskbar_details import monitor_metrics
@@ -30,6 +31,7 @@ class MenuCallbacks:
     desktop_visibility: Callable[[], None]
     taskbar_visibility: Callable[[], None]
     topmost: Callable[[], None]
+    auto_update: Callable[[], None]
     hide: Callable[[], None]
     exit_app: Callable[[], None]
     scale: Callable[[float, bool], None]
@@ -149,6 +151,7 @@ def _populate_context_menu(
     desktop_on = tk.BooleanVar(menu, value=config.desktop_visible)
     taskbar_on = tk.BooleanVar(menu, value=config.taskbar_visible)
     topmost_on = tk.BooleanVar(menu, value=config.smart_topmost)
+    auto_update_on = tk.BooleanVar(menu, value=config.auto_update)
     _ = menu.add_command(label="새로고침", command=callbacks.refresh)
     _ = menu.add_checkbutton(
         label="다크/라이트 전환",
@@ -176,6 +179,11 @@ def _populate_context_menu(
         command=callbacks.topmost,
         variable=topmost_on,
     )
+    _ = menu.add_checkbutton(
+        label="자동 업데이트",
+        command=callbacks.auto_update,
+        variable=auto_update_on,
+    )
     _add_scale_menu(
         menu,
         "전체 배율",
@@ -199,7 +207,9 @@ def _populate_context_menu(
     _ = menu.add_separator()
     _ = menu.add_command(label="데스크톱 숨기기", command=callbacks.hide)
     _ = menu.add_command(label="종료", command=callbacks.exit_app)
-    return theme_on, mini_on, desktop_on, taskbar_on, topmost_on
+    _ = menu.add_separator()
+    _ = menu.add_command(label=f"버전 v{__version__}", state="disabled")
+    return theme_on, mini_on, desktop_on, taskbar_on, topmost_on, auto_update_on
 
 
 def opacity_from_position(position: int, track_width: int) -> float:
