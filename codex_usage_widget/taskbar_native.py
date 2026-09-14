@@ -1,4 +1,8 @@
 # pyright: reportAny=false, reportMissingTypeStubs=false
+# pyright: reportMissingImports=false, reportUnknownVariableType=false
+# pyright: reportUnknownMemberType=false, reportUnknownArgumentType=false
+# comtypes.gen modules are generated at runtime, so the UIA block below is
+# unresolvable on a fresh environment; suppressed like topmost.py.
 """Win32 implementation of the real taskbar child surface."""
 
 from __future__ import annotations
