@@ -14,6 +14,10 @@ from codex_usage_widget import actions, menus, windows
 from codex_usage_widget import config as widget_config
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.fetcher import fetch_snapshot
+from codex_usage_widget.opacity_popup import (
+    OpacityPopupCallbacks,
+    OpacityPopupController,
+)
 from codex_usage_widget.position_store import persist_window_position
 from codex_usage_widget.presentation import present_snapshot
 from codex_usage_widget.service import RefreshService
@@ -78,6 +82,7 @@ class WidgetApplication:
         self._service = RefreshService(fetch_snapshot)
         self._signals: Queue[Signal] = Queue()
         self._taskbar_menu_open = Event()
+        self._popup_suspensions: set[str] = set()
         self._drag_origin: tuple[int, int, int, int] | None = None
         self._closing = False
         self._tray = TrayController(
@@ -99,6 +104,15 @@ class WidgetApplication:
         self._view = self._new_view()
         self._context_menu = menus.ContextMenuController(root)
         self._details = TaskbarDetailsPopup(root)
+        self._opacity_popup = OpacityPopupController(
+            root,
+            OpacityPopupCallbacks(
+                changed=self._set_opacity,
+                opened=self._opacity_opened,
+                closed=self._opacity_closed,
+                context_requested=self._show_menu,
+            ),
+        )
         self._taskbar = TaskbarController(
             lambda x, y: self._signals.put(("details", x, y)),
             lambda x, y: self._signals.put(("visibility_panel", x, y)),
@@ -184,6 +198,7 @@ class WidgetApplication:
         self._service.shutdown()
         self._details.close()
         self._visibility_panel.close()
+        self._opacity_popup.close()
         self._taskbar.stop()
         self._tray.stop()
         self._view.dispose()
@@ -222,6 +237,7 @@ class WidgetApplication:
                 return True
             case "details":
                 self._visibility_panel.close()
+                self._opacity_popup.close()
                 if x == 0 and y == 0:
                     x, y = self._root.winfo_pointerx(), self._root.winfo_pointery()
                 self._details.toggle(x, y, self._service.state, self._config.theme)
@@ -323,6 +339,7 @@ class WidgetApplication:
         self._taskbar.update(build_taskbar_model(state, datetime.now(tz=UTC)))
         self._details.update(state, self._config.theme)
         self._visibility_panel.update(self._config)
+        self._opacity_popup.update(self._config.opacity, self._config.theme)
         self._root.update_idletasks()
         width, height = self._view.pixel_size
         _ = self._root.geometry(f"{width}x{height}")
@@ -356,13 +373,24 @@ class WidgetApplication:
         self._save_and_render(actions.toggle_taskbar_visibility(self._config))
 
     def _show_opacity(self) -> None:
-        menus.show_opacity_popup(self._root, self._config.opacity, self._set_opacity)
+        _ = self._context_menu.dismiss()
+        self._visibility_panel.close()
+        self._details.close()
+        avoid = (
+            self._root.winfo_rootx(),
+            self._root.winfo_rooty(),
+            self._root.winfo_rootx() + self._root.winfo_width(),
+            self._root.winfo_rooty() + self._root.winfo_height(),
+        )
+        self._opacity_popup.toggle(self._config.opacity, self._config.theme, avoid)
 
     def _set_opacity(self, opacity: float) -> None:
         self._save_and_render(actions.set_opacity(self._config, opacity))
 
     def _show_menu(self, x: int, y: int) -> None:
         self._visibility_panel.close()
+        self._details.close()
+        self._opacity_popup.close()
         callbacks = menus.MenuCallbacks(
             self.refresh,
             self._toggle_theme,
@@ -383,6 +411,7 @@ class WidgetApplication:
     def _show_visibility_panel(self, x: int, y: int) -> None:
         _ = self._context_menu.dismiss()
         self._details.close()
+        self._opacity_popup.close()
         brand = self._view.brand_screen_region
         avoid = None
         if brand is not None and brand.contains(x, y):
@@ -402,12 +431,28 @@ class WidgetApplication:
 
     def _menu_opened(self) -> None:
         self._taskbar_menu_open.set()
-        self._topmost.suspend()
+        self._suspend_popup("menu")
 
     def _menu_closed(self) -> None:
         _ = self._taskbar.suppress_held_menu_release()
         self._taskbar_menu_open.clear()
-        self._topmost.resume()
+        self._resume_popup("menu")
+
+    def _opacity_opened(self) -> None:
+        self._suspend_popup("opacity")
+
+    def _opacity_closed(self) -> None:
+        self._resume_popup("opacity")
+
+    def _suspend_popup(self, owner: str) -> None:
+        if not self._popup_suspensions:
+            self._topmost.suspend()
+        self._popup_suspensions.add(owner)
+
+    def _resume_popup(self, owner: str) -> None:
+        self._popup_suspensions.discard(owner)
+        if not self._popup_suspensions and not self._closing:
+            self._topmost.resume()
 
     def _set_scale(self, value: float, mini: bool) -> None:
         self._save_and_render(actions.set_scale(self._config, value, mini=mini))

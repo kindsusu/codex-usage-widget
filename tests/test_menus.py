@@ -81,7 +81,11 @@ def test_selected_command_remains_alive_until_idle_cleanup(
             destroyed.append("destroyed")
 
     popup = _Popup()
-    def new_menu(_root: object, _tokens: object) -> _Popup:
+    def new_menu(
+        _root: object,
+        _tokens: object,
+        _font: tuple[str, int],
+    ) -> _Popup:
         return popup
 
     def populate(*_args: object) -> tuple[()]:

@@ -4,7 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
 from threading import Event
-from typing import final
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast, final
 
 import pytest
 
@@ -13,6 +14,9 @@ from codex_usage_widget.config import WidgetConfig, load_config
 from codex_usage_widget.position_store import persist_window_position
 from codex_usage_widget.windows import WindowPosition
 from codex_usage_widget.windows import SingleInstanceStatus
+
+if TYPE_CHECKING:
+    from codex_usage_widget.topmost import SmartTopmostController
 
 
 @final
@@ -273,6 +277,27 @@ def test_saved_config_refreshes_tray_menu_after_state_is_applied(
     assert application._config is updated
     assert load_config(tmp_path / "config.json") == updated
     assert tray.menu_refreshes == 1
+
+
+def test_popup_suspension_resumes_only_after_all_popups_close() -> None:
+    application = runtime.WidgetApplication.__new__(runtime.WidgetApplication)
+    calls: list[str] = []
+    topmost = SimpleNamespace(
+        suspend=lambda: calls.append("suspend"),
+        resume=lambda: calls.append("resume"),
+    )
+    application._topmost = cast(
+        "SmartTopmostController", cast("object", topmost)
+    )
+    application._popup_suspensions = set()
+    application._closing = False
+
+    application._suspend_popup("menu")
+    application._suspend_popup("opacity")
+    application._resume_popup("menu")
+    application._resume_popup("opacity")
+
+    assert calls == ["suspend", "resume"]
 
 
 def test_poll_reschedules_before_modal_menu_dispatch(

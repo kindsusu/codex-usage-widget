@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, final
 
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import ThemeName, WidgetConfig
+from codex_usage_widget.taskbar_details import monitor_metrics
 from codex_usage_widget.theme import ThemeTokens, theme_tokens
 
 if TYPE_CHECKING:
@@ -93,14 +94,18 @@ class ContextMenuController:
     ) -> None:
         root = self._root
         tokens = theme_tokens(config.theme)
-        menu = _new_menu(root, tokens)
+        _, dpi = monitor_metrics(x, y)
+        menu_font = ("Malgun Gothic", -max(14, round(14 * dpi / 96)))
+        menu = _new_menu(root, tokens, menu_font)
         self._active = menu
         native_owner = 0
         menu_variables: tuple[tk.BooleanVar, ...] = ()
         try:
             # Tcl does not retain Python Variable objects. Keep these references
             # alive for the full modal loop so every check mark remains visible.
-            menu_variables = _populate_context_menu(menu, config, callbacks, tokens)
+            menu_variables = _populate_context_menu(
+                menu, config, callbacks, tokens, menu_font
+            )
             callbacks.menu_opened()
             native_owner = _prepare_native_popup(root)
             self._native_owner = native_owner
@@ -131,6 +136,7 @@ def _populate_context_menu(
     config: WidgetConfig,
     callbacks: MenuCallbacks,
     tokens: ThemeTokens,
+    menu_font: tuple[str, int],
 ) -> tuple[tk.BooleanVar, ...]:
     """Populate one rebuilt context menu from current configuration."""
     # Rebuilt on every popup, so each variable snapshots the CURRENT config.
@@ -170,9 +176,23 @@ def _populate_context_menu(
         command=callbacks.topmost,
         variable=topmost_on,
     )
-    _add_scale_menu(menu, "전체 배율", False, callbacks.scale)
-    _add_scale_menu(menu, "미니 배율", True, callbacks.scale)
-    pet_menu = _new_menu(menu, tokens)
+    _add_scale_menu(
+        menu,
+        "전체 배율",
+        False,
+        callbacks.scale,
+        tokens=tokens,
+        menu_font=menu_font,
+    )
+    _add_scale_menu(
+        menu,
+        "미니 배율",
+        True,
+        callbacks.scale,
+        tokens=tokens,
+        menu_font=menu_font,
+    )
+    pet_menu = _new_menu(menu, tokens, menu_font)
     for name in PET_NAMES:
         _ = pet_menu.add_command(label=name, command=_pet_command(callbacks.pet, name))
     _ = menu.add_cascade(label="펫 선택", menu=pet_menu)
@@ -182,105 +202,22 @@ def _populate_context_menu(
     return theme_on, mini_on, desktop_on, taskbar_on, topmost_on
 
 
-def show_opacity_popup(
-    root: tk.Tk,
-    opacity: float,
-    callback: Callable[[float], None],
-    tokens: ThemeTokens | None = None,
-) -> None:
-    """Show a compact token-styled 30-100 percent opacity slider."""
-    resolved = tokens or _tokens_from_root(root)
-    popup = tk.Toplevel(root)
-    _ = popup.overrideredirect(True)
-    _ = popup.attributes("-topmost", True)
-    _ = popup.resizable(False, False)
-    _ = popup.configure(bg=resolved.surface_primary)
-    _ = popup.geometry(f"196x76+{root.winfo_x() + 52}+{root.winfo_y() + 34}")
-    shell = tk.Frame(
-        popup,
-        bg=resolved.surface_primary,
-        highlightbackground=resolved.bar_background,
-        highlightthickness=1,
-        padx=resolved.space_5,
-        pady=resolved.space_3,
-    )
-    _ = shell.pack(fill="both", expand=True)
-    header = tk.Frame(shell, bg=resolved.surface_primary)
-    _ = header.pack(fill="x")
-    _ = tk.Label(
-        header,
-        text="투명도",
-        bg=resolved.surface_primary,
-        fg=resolved.text_primary,
-        font=(resolved.font_family, 9, "bold"),
-    ).pack(side="left")
-    value_label = tk.Label(
-        header,
-        bg=resolved.surface_primary,
-        fg=resolved.text_secondary,
-        font=(resolved.font_family, 8),
-    )
-    _ = value_label.pack(side="right")
-    track_width = 152
-    slider = tk.Canvas(
-        shell,
-        width=track_width,
-        height=28,
-        bg=resolved.surface_primary,
-        highlightthickness=0,
-        cursor="hand2",
-    )
-    _ = slider.pack(fill="x", pady=(resolved.space_2, 0))
-
-    current = max(0.3, min(1.0, opacity))
-
-    def draw(value: float) -> None:
-        _ = slider.delete("all")
-        left, right, center = 6, track_width - 6, 14
-        fraction = (value - 0.3) / 0.7
-        thumb_x = left + fraction * (right - left)
-        _ = slider.create_line(
-            left, center, right, center, fill=resolved.bar_background, width=4
-        )
-        _ = slider.create_line(
-            left, center, thumb_x, center, fill=resolved.accent_primary, width=4
-        )
-        _ = slider.create_oval(
-            thumb_x - 5,
-            center - 5,
-            thumb_x + 5,
-            center + 5,
-            fill=resolved.surface_primary,
-            outline=resolved.focus_ring,
-            width=2,
-        )
-        _ = value_label.configure(text=f"{round(value * 100)}%")
-
-    def changed(event: tk.Event[tk.Misc]) -> None:
-        value = opacity_from_position(event.x - 6, track_width - 12)
-        draw(value)
-        callback(value)
-
-    _ = slider.bind("<Button-1>", changed)
-    _ = slider.bind("<B1-Motion>", changed)
-    _ = popup.bind("<Escape>", lambda _event: popup.destroy())
-    draw(current)
-    _ = popup.focus_force()
-
-
 def opacity_from_position(position: int, track_width: int) -> float:
     """Map a slider coordinate to the supported opacity range."""
     fraction = max(0.0, min(1.0, position / track_width))
     return round(0.3 + fraction * 0.7, 3)
 
 
-def _add_scale_menu(
+def _add_scale_menu(  # noqa: PLR0913 -- shared typography and palette are explicit
     menu: tk.Menu,
     label: str,
     mini: bool,
     callback: Callable[[float, bool], None],
+    *,
+    tokens: ThemeTokens,
+    menu_font: tuple[str, int],
 ) -> None:
-    submenu = tk.Menu(menu, tearoff=False)
+    submenu = _new_menu(menu, tokens, menu_font)
     for value in (0.75, 1.0, 1.3, 1.5, 2.0):
         _ = submenu.add_command(
             label=f"{round(value * 100)}%",
@@ -304,7 +241,11 @@ def _pet_command(
     return lambda: callback(name)
 
 
-def _new_menu(parent: tk.Misc, tokens: ThemeTokens) -> tk.Menu:
+def _new_menu(
+    parent: tk.Misc,
+    tokens: ThemeTokens,
+    menu_font: tuple[str, int],
+) -> tk.Menu:
     return tk.Menu(
         parent,
         tearoff=False,
@@ -315,18 +256,8 @@ def _new_menu(parent: tk.Misc, tokens: ThemeTokens) -> tk.Menu:
         selectcolor=tokens.accent_primary,
         borderwidth=1,
         relief="flat",
-        font=(tokens.font_family, 9),
+        font=menu_font,
     )
-
-
-def _tokens_from_root(root: tk.Tk) -> ThemeTokens:
-    dark = theme_tokens(ThemeName.DARK)
-    theme = (
-        ThemeName.DARK
-        if str(root.cget("bg")) == dark.surface_primary
-        else ThemeName.LIGHT
-    )
-    return theme_tokens(theme)
 
 
 def _prepare_native_popup(root: tk.Tk) -> int:

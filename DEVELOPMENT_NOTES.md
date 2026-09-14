@@ -124,3 +124,23 @@
 - 실제 Tk는 HTML backdrop blur·그림자·요소별 반투명을 구현하지 않는다. 단색 카드에 저장된 전체 창 투명도를 적용하며 이를 픽셀 단위 동일 구현으로 보고하지 않는다.
 
 전체 테스트 264개, Ruff, basedpyright 오류 0, 실제 Windows 동작 26개를 통과했다. 세부 조건과 실제 화면은 [리디자인 검수](docs/desktop-redesign-validation.md)에 기록한다.
+
+---
+
+## 11. 투명도 팝업 수명·DPI 메뉴 크기 (2026-09-14)
+
+> **상태: 완료.** 단위 테스트 268개, Ruff, Basedpyright를 통과했고, `work/design-audit/popup-final-results.json`의 실제 입력 점검 19개가 오류 없이 통과했다.
+
+### 증상과 원인
+
+- fire-and-forget으로 만든 투명도 창은 소유자가 수명을 추적하지 않아 FocusOut이나 우클릭으로 닫을 경로가 없고 화면에 남을 수 있다.
+- root 배경 chroma key 색으로 테마를 추론하면 실제 테마와 다를 수 있다.
+- Tk 9pt 기본 글꼴은 widget scaling을 따라가 고 DPI에서 메뉴가 지나치게 작아진다. raw `tk.Menu`로 만든 하위 메뉴도 글꼴을 명시하지 않아 부모 메뉴와 크기가 달라진다.
+
+### 수정 방향
+
+- 투명도 창은 single-owned controller가 수명과 닫기를 관리하고, 다른 팝업과는 배타적으로 연다.
+- 위젯 배율과 독립적으로 모니터 DPI를 반영한 14px 논리 크기 글꼴을 부모·하위 메뉴 모두에 적용한다. Windows 150%에서는 21px, 200%에서는 28px로 표시한다.
+- 슬라이더 track 전체를 hit box로 처리하고, 팝업 동안 부모 z-order를 동결한다.
+
+실제 입력 점검은 읽기 쉬운 우클릭 메뉴, 단일 투명도 창, 위젯·팝업 우클릭의 기존 창 닫기, 슬라이더 조작, Esc·바깥 클릭·반복 요청 닫기, 표시 패널·상세·메뉴와의 상호 배타성, 미니 150%의 메뉴 글꼴 크기 유지, 저장 테마, 데스크톱 숨김과 smart topmost 상태를 포함한다. 결과는 `popup-final-results.json`에 보관한다.
