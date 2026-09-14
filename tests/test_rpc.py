@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -35,9 +36,29 @@ def _configure_fake_server(
     return Path(sys.executable).resolve()
 
 
+@pytest.fixture(scope="session")
+def relocatable_interpreter(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, str]:
+    """Return a python.exe that still runs after being copied elsewhere.
+
+    Copying ``sys.executable`` is only relocatable when the suite happens to run
+    inside a virtual environment, where it is a launcher stub that reads
+    ``pyvenv.cfg`` to find its real installation. Run by a plain interpreter --
+    a CI runner's, for instance -- the copy finds neither its DLL nor its
+    standard library. Building one throwaway venv per session yields that stub
+    and its marker file for every caller, whatever runs the suite.
+    """
+    root = tmp_path_factory.mktemp("relocatable-venv")
+    venv.EnvBuilder(with_pip=False).create(root)
+    marker = (root / "pyvenv.cfg").read_text(encoding="utf-8")
+    return root / "Scripts" / "python.exe", marker
+
+
 def _configure_automatic_candidates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    relocatable_interpreter: tuple[Path, str],
 ) -> tuple[Path, Path]:
     _ = shutil.copyfile(_FIXTURE, tmp_path / "app-server")
     path_directory = tmp_path / "path"
@@ -48,11 +69,9 @@ def _configure_automatic_candidates(
         tmp_path / "local" / "OpenAI" / "Codex" / "bin" / "version" / "codex.exe"
     )
     installed.parent.mkdir(parents=True)
-    _ = shutil.copyfile(sys.executable, installed)
-    _ = shutil.copyfile(
-        Path(sys.prefix) / "pyvenv.cfg",
-        installed.parent / "pyvenv.cfg",
-    )
+    interpreter, marker = relocatable_interpreter
+    _ = shutil.copyfile(interpreter, installed)
+    _ = (installed.parent / "pyvenv.cfg").write_text(marker, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CODEX_EXE", raising=False)
     monkeypatch.setenv("PATH", str(path_directory))
@@ -187,9 +206,14 @@ def test_read_rate_limits_reports_missing_explicit_executable(
 def test_read_rate_limits_falls_back_when_path_candidate_cannot_launch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    relocatable_interpreter: tuple[Path, str],
 ) -> None:
     # Given
-    _, installed = _configure_automatic_candidates(monkeypatch, tmp_path)
+    _, installed = _configure_automatic_candidates(
+        monkeypatch,
+        tmp_path,
+        relocatable_interpreter,
+    )
 
     # When
     result = read_rate_limits(timeout_seconds=2.0)
@@ -202,9 +226,14 @@ def test_read_rate_limits_falls_back_when_path_candidate_cannot_launch(
 def test_read_rate_limits_does_not_fallback_from_explicit_executable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    relocatable_interpreter: tuple[Path, str],
 ) -> None:
     # Given
-    blocked, _ = _configure_automatic_candidates(monkeypatch, tmp_path)
+    blocked, _ = _configure_automatic_candidates(
+        monkeypatch,
+        tmp_path,
+        relocatable_interpreter,
+    )
     monkeypatch.setenv("CODEX_EXE", str(blocked))
 
     # When

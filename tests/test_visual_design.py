@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from typing import cast, final
 
 import codex_usage_widget.icons as icons
@@ -110,19 +110,35 @@ def test_failure_body_is_actionable_and_footer_is_not_a_duplicate() -> None:
     assert body != footer
 
 
-def test_stale_footer_includes_last_success_time_and_retry_hint() -> None:
-    fetched_at = datetime(2026, 7, 16, 5, 34, tzinfo=UTC)
-    snapshot = UsageSnapshot((), None, None, fetched_at)
-    state = WidgetState(
-        snapshot=snapshot,
+def _stale_state(fetched_at: datetime) -> WidgetState:
+    return WidgetState(
+        snapshot=UsageSnapshot((), None, None, fetched_at),
         status=RefreshStatus.STALE,
         refresh_in_flight=False,
         failure=FailureKind.UNAVAILABLE,
     )
 
-    footer = footer_text(None, state)
 
-    assert footer == "마지막 확인 14:34 · 우클릭하여 새로고침"
+def test_stale_footer_includes_last_success_time_and_retry_hint() -> None:
+    # Given -- one instant, tagged two ways. The footer renders the reader's
+    # local wall clock, so the expected time is derived the same way instead of
+    # being pinned to whichever zone this machine happens to run in.
+    fetched_at = datetime(2026, 7, 16, 5, 34, tzinfo=UTC)
+    elsewhere = fetched_at.astimezone(timezone(timedelta(hours=-4)))
+    expected = f"마지막 확인 {fetched_at.astimezone():%H:%M} · 우클릭하여 새로고침"
+
+    # When
+    footer = footer_text(None, _stale_state(fetched_at))
+    same_instant = footer_text(None, _stale_state(elsewhere))
+
+    # Then
+    assert footer == expected
+    # Normalizing to the instant, not to the naive wall clock, is the behavior
+    # under test: the same moment must read identically whatever zone tags it.
+    assert same_instant == footer
+    assert elsewhere.hour != fetched_at.hour
+    assert footer.startswith("마지막 확인 ")
+    assert footer.endswith(" · 우클릭하여 새로고침")
 
 
 def test_opacity_slider_maps_track_positions_to_supported_range() -> None:
