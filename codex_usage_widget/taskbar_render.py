@@ -56,23 +56,22 @@ class TaskbarHitRegions:
 
 
 def taskbar_hit_regions(width: int, height: int, dpi: int) -> TaskbarHitRegions:
-    """Return DPI-scaled hit targets for native pointer routing."""
+    """Return DPI-scaled hit targets for native pointer routing.
+
+    The Codex mark sits on the left and the usage block on its right
+    (2026-09-14 user-approved layout change).
+    """
     scale = max(_BASE_DPI, dpi) / _BASE_DPI
     menu_width = min(width, round(_MENU_WIDTH * scale))
     gap = min(max(0, width - menu_width), round(_GAP * scale))
-    usage_width = max(0, width - menu_width - gap)
+    usage_left = menu_width + gap
     content_height = min(height, round(_HEIGHT * scale))
     top = max(0, (height - content_height) // 2)
     menu_height = min(content_height, round(_MENU_HEIGHT * scale))
     menu_top = top + (content_height - menu_height) // 2
     return TaskbarHitRegions(
-        usage=HitRegion(0, top, usage_width, top + content_height),
-        menu=HitRegion(
-            usage_width + gap,
-            menu_top,
-            width,
-            menu_top + menu_height,
-        ),
+        usage=HitRegion(usage_left, top, width, top + content_height),
+        menu=HitRegion(0, menu_top, menu_width, menu_top + menu_height),
     )
 
 
@@ -102,7 +101,7 @@ def render_taskbar(  # noqa: PLR0913
     _draw_usage(draw, model, regions.usage, factor, palette)
     _draw_menu(canvas, regions.menu, factor, palette, model)
     rendered = canvas.resize((width, height), Image.Resampling.LANCZOS)
-    logical_width = regions.usage.right * _BASE_DPI / dpi
+    logical_width = (regions.usage.right - regions.usage.left) * _BASE_DPI / dpi
     if model.rows and logical_width >= _MIN_FULL_WIDTH:
         _redraw_tracks(rendered, model.rows[:2], regions.usage, dpi, palette)
     _ensure_hit_alpha(rendered, regions, dpi)

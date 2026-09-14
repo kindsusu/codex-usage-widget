@@ -44,7 +44,7 @@ class FakeUser32:
 
     def GetCursorPos(self, point: object) -> bool:  # noqa: N802
         native = point._obj  # pyright: ignore[reportAttributeAccessIssue]
-        native.x, native.y = 170, 23
+        native.x, native.y = 20, 23
         return True
 
     def ScreenToClient(self, hwnd: int, point: object) -> bool:  # noqa: N802
@@ -181,10 +181,10 @@ def test_mouse_regions_split_usage_and_menu(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
     monkeypatch.setattr(host, "_render_layered", _ignore_hwnd)
 
-    host._handle_mouse_move(10, 23 << 16 | 153)
+    host._handle_mouse_move(10, 23 << 16 | 100)
     assert host._hover_region == "usage"
 
-    host._handle_mouse_move(10, 23 << 16 | 159)
+    host._handle_mouse_move(10, 23 << 16 | 20)
     assert host._hover_region == "menu"
 
 
@@ -201,7 +201,7 @@ def test_click_routing_uses_event_coordinates_not_stale_hover(
     user32 = FakeUser32()
     monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
 
-    _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, 23 << 16 | 20)
+    _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, 23 << 16 | 100)
 
     assert calls == ["details"]
 
@@ -217,7 +217,7 @@ def test_codex_left_and_right_click_have_distinct_callbacks(
     )
     user32 = FakeUser32()
     monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
-    point = 23 << 16 | 170
+    point = 23 << 16 | 20
 
     _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, point)
     _ = host._window_proc(10, taskbar_native.WM_RBUTTONUP, 0, point)
@@ -238,7 +238,7 @@ def test_held_dismissal_consumes_only_its_matching_release(
     monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
 
     assert host.suppress_held_menu_release()
-    menu_point = 23 << 16 | 170
+    menu_point = 23 << 16 | 20
     _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, menu_point)
     assert calls == []
 
@@ -261,7 +261,7 @@ def test_dragging_out_clears_held_release_suppression(
 
     assert host.suppress_held_menu_release()
     _ = host._window_proc(10, taskbar_native.WM_MOUSELEAVE, 0, 0)
-    _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, 23 << 16 | 170)
+    _ = host._window_proc(10, taskbar_native.WM_LBUTTONUP, 0, 23 << 16 | 20)
 
     assert calls == ["menu"]
 
