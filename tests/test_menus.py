@@ -104,20 +104,20 @@ def test_selected_command_remains_alive_until_idle_cleanup(
     def noop() -> None:
         return None
     callbacks = menus.MenuCallbacks(
-        noop,
-        noop,
-        noop,
-        noop,
-        noop,
-        lambda: selected.append("selected"),
-        noop,
-        noop,
-        noop,
-        noop,
-        lambda _value, _mini: None,
-        lambda _name: None,
-        noop,
-        lambda: closed.append("closed"),
+        refresh=noop,
+        theme=noop,
+        opacity=noop,
+        desktop_normal=noop,
+        desktop_mini=noop,
+        desktop_hidden=noop,
+        taskbar_visibility=lambda: selected.append("selected"),
+        topmost=noop,
+        auto_update=noop,
+        exit_app=noop,
+        scale=lambda _value, _mini: None,
+        pet=lambda _name: None,
+        menu_opened=noop,
+        menu_closed=lambda: closed.append("closed"),
     )
 
     controller._show(10, 20, WidgetConfig(), callbacks)

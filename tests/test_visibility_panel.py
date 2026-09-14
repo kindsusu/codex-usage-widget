@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, cast, final
 import pytest
 
 import codex_usage_widget.visibility_panel as visibility_panel
+from codex_usage_widget.actions import DesktopMode
 from codex_usage_widget.visibility_panel import (
     VisibilityCallbacks,
     VisibilityPanel,
@@ -51,10 +52,15 @@ class _Window:
 
 
 def test_visibility_note_covers_every_surface_combination() -> None:
-    assert _visibility_note(True, True) == "두 위치에 표시 중"
-    assert _visibility_note(True, False) == "바탕화면에만 표시 중"
-    assert _visibility_note(False, True) == "작업표시줄에만 표시 중"
-    assert _visibility_note(False, False) == "트레이에서 다시 표시할 수 있음"
+    assert _visibility_note(DesktopMode.NORMAL, True) == (
+        "일반 위젯 · 작업표시줄 표시"
+    )
+    assert _visibility_note(DesktopMode.MINI, False) == (
+        "미니 위젯 · 작업표시줄 숨김"
+    )
+    assert _visibility_note(DesktopMode.HIDDEN, True) == (
+        "바탕화면 숨김 · 작업표시줄 표시"
+    )
 
 
 def test_translucent_design_tokens_are_blended_onto_card_surface() -> None:
@@ -62,8 +68,8 @@ def test_translucent_design_tokens_are_blended_onto_card_surface() -> None:
 
 
 def test_panel_matches_reference_size_at_system_dpi() -> None:
-    assert visibility_panel_size(96) == (292, 219)
-    assert visibility_panel_size(144) == (438, 328)
+    assert visibility_panel_size(96) == (292, 259)
+    assert visibility_panel_size(144) == (438, 388)
 
 
 def test_panel_edge_mask_is_binary_and_keeps_rounded_corners_clear() -> None:
@@ -82,7 +88,9 @@ def test_only_the_three_reference_rows_are_interactive() -> None:
     assert panel._row_at(85) == 0
     assert panel._row_at(86) == 1
     assert panel._row_at(165) == 2
-    assert panel._row_at(166) is None
+    assert panel._row_at(166) == 3
+    assert panel._row_at(205) == 3
+    assert panel._row_at(206) is None
 
 
 def test_trigger_focus_out_waits_for_native_release_toggle(
@@ -95,6 +103,7 @@ def test_trigger_focus_out_waits_for_native_release_toggle(
     panel._hover = None
     panel._icon = None
     panel._callbacks = VisibilityCallbacks(
+        lambda: None,
         lambda: None,
         lambda: None,
         lambda: None,

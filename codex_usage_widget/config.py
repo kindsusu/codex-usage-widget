@@ -150,15 +150,25 @@ def load_config(path: Path) -> WidgetConfig:
 
 
 def select_initial_config(config: WidgetConfig) -> tuple[WidgetConfig, bool]:
-    """Assign a random pet when unset and report whether persistence is required.
+    """Canonicalize legacy display flags and assign a pet when unset.
 
     Configs whose pet is no longer in the pool -- notably the retired
     ``claudecode`` mascot, which loads back as ``None`` -- are treated as unset
     and rerolled to a random remaining pet so the new choice is persisted.
     """
-    changed = config.pet not in PET_NAMES
+    changed = config.pet not in PET_NAMES or (
+        not config.desktop_visible and config.mini_mode
+    )
     if not changed:
         return config, False
+    # Older releases retained ``mini_mode`` while hidden.  The current UI has
+    # one exclusive desktop state, so hidden is persisted as (False, False).
+    config = replace(
+        config,
+        mini_mode=config.mini_mode if config.desktop_visible else False,
+    )
+    if config.pet in PET_NAMES:
+        return config, True
     # Cosmetic mascot pick only -- no security relevance to the randomness.
     return replace(config, pet=random.choice(PET_NAMES)), True  # noqa: S311
 

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
 from codex_usage_widget import __version__
+from codex_usage_widget.actions import DesktopMode, desktop_mode
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import ThemeName, WidgetConfig
 from codex_usage_widget.taskbar_details import monitor_metrics
@@ -27,12 +28,12 @@ class MenuCallbacks:
     refresh: Callable[[], None]
     theme: Callable[[], None]
     opacity: Callable[[], None]
-    mini: Callable[[], None]
-    desktop_visibility: Callable[[], None]
+    desktop_normal: Callable[[], None]
+    desktop_mini: Callable[[], None]
+    desktop_hidden: Callable[[], None]
     taskbar_visibility: Callable[[], None]
     topmost: Callable[[], None]
     auto_update: Callable[[], None]
-    hide: Callable[[], None]
     exit_app: Callable[[], None]
     scale: Callable[[float, bool], None]
     pet: Callable[[str], None]
@@ -101,7 +102,7 @@ class ContextMenuController:
         menu = _new_menu(root, tokens, menu_font)
         self._active = menu
         native_owner = 0
-        menu_variables: tuple[tk.BooleanVar, ...] = ()
+        menu_variables: tuple[tk.Variable, ...] = ()
         try:
             # Tcl does not retain Python Variable objects. Keep these references
             # alive for the full modal loop so every check mark remains visible.
@@ -139,16 +140,15 @@ def _populate_context_menu(
     callbacks: MenuCallbacks,
     tokens: ThemeTokens,
     menu_font: tuple[str, int],
-) -> tuple[tk.BooleanVar, ...]:
+) -> tuple[tk.Variable, ...]:
     """Populate one rebuilt context menu from current configuration."""
     # Rebuilt on every popup, so each variable snapshots the CURRENT config.
-    # These BooleanVars MUST stay referenced: an unreferenced tk.BooleanVar is
+    # These Variables MUST stay referenced: an unreferenced tk.Variable is
     # garbage-collected immediately, which unsets its Tcl variable and makes the
     # checkbutton render unchecked. Named locals stay alive across the modal
     # tk_popup below, so the checkbuttons reflect live state while displayed.
     theme_on = tk.BooleanVar(menu, value=config.theme is ThemeName.DARK)
-    mini_on = tk.BooleanVar(menu, value=config.mini_mode)
-    desktop_on = tk.BooleanVar(menu, value=config.desktop_visible)
+    desktop_mode_value = tk.StringVar(menu, value=desktop_mode(config).value)
     taskbar_on = tk.BooleanVar(menu, value=config.taskbar_visible)
     topmost_on = tk.BooleanVar(menu, value=config.smart_topmost)
     auto_update_on = tk.BooleanVar(menu, value=config.auto_update)
@@ -159,15 +159,23 @@ def _populate_context_menu(
         variable=theme_on,
     )
     _ = menu.add_command(label="투명도 조절", command=callbacks.opacity)
-    _ = menu.add_checkbutton(
-        label="데스크톱 표시",
-        command=callbacks.desktop_visibility,
-        variable=desktop_on,
+    _ = menu.add_radiobutton(
+        label="데스크톱 일반 모드",
+        command=callbacks.desktop_normal,
+        variable=desktop_mode_value,
+        value=DesktopMode.NORMAL.value,
     )
-    _ = menu.add_checkbutton(
-        label="미니모드",
-        command=callbacks.mini,
-        variable=mini_on,
+    _ = menu.add_radiobutton(
+        label="데스크톱 미니 모드",
+        command=callbacks.desktop_mini,
+        variable=desktop_mode_value,
+        value=DesktopMode.MINI.value,
+    )
+    _ = menu.add_radiobutton(
+        label="데스크톱 숨기기",
+        command=callbacks.desktop_hidden,
+        variable=desktop_mode_value,
+        value=DesktopMode.HIDDEN.value,
     )
     _ = menu.add_checkbutton(
         label="작업표시줄 표시",
@@ -205,11 +213,10 @@ def _populate_context_menu(
         _ = pet_menu.add_command(label=name, command=_pet_command(callbacks.pet, name))
     _ = menu.add_cascade(label="펫 선택", menu=pet_menu)
     _ = menu.add_separator()
-    _ = menu.add_command(label="데스크톱 숨기기", command=callbacks.hide)
     _ = menu.add_command(label="종료", command=callbacks.exit_app)
     _ = menu.add_separator()
     _ = menu.add_command(label=f"버전 v{__version__}", state="disabled")
-    return theme_on, mini_on, desktop_on, taskbar_on, topmost_on, auto_update_on
+    return theme_on, desktop_mode_value, taskbar_on, topmost_on, auto_update_on
 
 
 def opacity_from_position(position: int, track_width: int) -> float:

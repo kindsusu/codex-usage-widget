@@ -87,6 +87,23 @@ def test_load_migrates_retired_claudecode_pet_to_a_random_remaining_pet(
     assert migrated.pet != "claudecode"
 
 
+def test_select_initial_config_canonicalizes_legacy_hidden_mini_state() -> None:
+    legacy = WidgetConfig(
+        pet="image (10)",
+        desktop_visible=False,
+        mini_mode=True,
+        taskbar_visible=False,
+    )
+
+    migrated, changed = select_initial_config(legacy)
+
+    assert changed is True
+    assert migrated.desktop_visible is False
+    assert migrated.mini_mode is False
+    assert migrated.taskbar_visible is False
+    assert migrated.pet == legacy.pet
+
+
 def test_widget_config_rejects_out_of_range_values_without_echoing_them() -> None:
     # Given
     invalid_opacity = 0.1

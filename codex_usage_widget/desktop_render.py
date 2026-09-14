@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 CardMode: TypeAlias = Literal["full", "mini"]
 HoverRegion: TypeAlias = Literal["brand", "mode"]
 _SUPERSAMPLE: Final = 3
+_FULL_BASE_SCALE: Final = 0.70
 _FONT_ROOT: Final = Path("C:/Windows/Fonts")
 _MAX_STATUS_CHARS: Final = 24
 _BASE_ROW_COUNT: Final = 2
@@ -120,8 +121,9 @@ def render_desktop_card(
     scale: float = 1.0,
     hover_region: HoverRegion | None = None,
 ) -> RenderedDesktopCard:
-    """Render one card at logical CSS size multiplied once by ``scale``."""
+    """Render one card at its mode-specific base size multiplied by ``scale``."""
     scale = max(0.5, min(4.0, scale))
+    render_scale = scale * (_FULL_BASE_SCALE if mode == "full" else 1.0)
     logical_width = (
         CARD_METRICS.full_width if mode == "full" else CARD_METRICS.mini_width
     )
@@ -132,24 +134,28 @@ def render_desktop_card(
         logical_height += (len(model.rows) - _BASE_ROW_COUNT) * _EXTRA_ROW_HEIGHT
     if mode == "full" and model.status_text is not None:
         logical_height += CARD_METRICS.status_extra_height
-    width = max(1, round(logical_width * scale))
-    height = max(1, round(logical_height * scale))
-    ss_scale = scale * _SUPERSAMPLE
+    width = max(1, round(logical_width * render_scale))
+    height = max(1, round(logical_height * render_scale))
+    ss_scale = render_scale * _SUPERSAMPLE
     canvas = Image.new("RGBA", (width * _SUPERSAMPLE, height * _SUPERSAMPLE))
     palette = card_palette(light_theme)
     draw = ImageDraw.Draw(canvas)
     _draw_card_background(
         canvas, draw, mode, logical_width, logical_height, ss_scale, palette
     )
-    regions = _hit_regions(mode, scale)
+    regions = _hit_regions(mode, render_scale)
     if mode == "full":
         _draw_full(canvas, draw, model, ss_scale, palette, hover_region)
     else:
         _draw_mini(canvas, draw, model, ss_scale, palette, hover_region)
     image = canvas.resize((width, height), Image.Resampling.LANCZOS)
-    _redraw_tracks(image, model, mode, scale, palette)
-    _clip_opaque_silhouette(image, mode, scale)
-    return RenderedDesktopCard(image, regions, logical_width, logical_height)
+    _redraw_tracks(image, model, mode, render_scale, palette)
+    _clip_opaque_silhouette(image, mode, render_scale)
+    base_width = round(logical_width * (_FULL_BASE_SCALE if mode == "full" else 1.0))
+    base_height = round(
+        logical_height * (_FULL_BASE_SCALE if mode == "full" else 1.0)
+    )
+    return RenderedDesktopCard(image, regions, base_width, base_height)
 
 
 def _draw_card_background(

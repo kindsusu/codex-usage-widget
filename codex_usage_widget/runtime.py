@@ -57,6 +57,8 @@ SignalCommand: TypeAlias = Literal[
     "menu_close",
     "visibility_panel",
     "desktop",
+    "desktop_normal",
+    "desktop_hidden",
     "mini",
     "taskbar",
     "refresh",
@@ -94,12 +96,12 @@ class WidgetApplication:
             lambda: self._queue("show"),
             lambda: self._queue("exit"),
             callbacks=TrayCallbacks(
-                toggle_desktop=lambda: self._queue("desktop"),
-                toggle_mini=lambda: self._queue("mini"),
+                desktop_normal=lambda: self._queue("desktop_normal"),
+                desktop_mini=lambda: self._queue("mini"),
+                desktop_hidden=lambda: self._queue("desktop_hidden"),
                 toggle_taskbar=lambda: self._queue("taskbar"),
                 show_details=lambda: self._queue("details"),
-                desktop_checked=lambda: self._config.desktop_visible,
-                mini_checked=lambda: self._config.mini_mode,
+                desktop_mode=lambda: actions.desktop_mode(self._config),
                 taskbar_checked=lambda: self._config.taskbar_visible,
                 refresh=lambda: self._queue("refresh"),
             ),
@@ -126,8 +128,9 @@ class WidgetApplication:
         self._visibility_panel = VisibilityPanel(
             root,
             VisibilityCallbacks(
-                self._toggle_desktop_visibility,
-                self._toggle_mini,
+                lambda: self._set_desktop_mode(actions.DesktopMode.NORMAL),
+                lambda: self._set_desktop_mode(actions.DesktopMode.MINI),
+                lambda: self._set_desktop_mode(actions.DesktopMode.HIDDEN),
                 self._toggle_taskbar_visibility,
                 self._visibility_trigger_contains,
             ),
@@ -192,8 +195,8 @@ class WidgetApplication:
 
     def hide(self) -> None:
         """Persistently hide only the desktop surface."""
-        if self._config.desktop_visible:
-            self._toggle_desktop_visibility()
+        if actions.desktop_mode(self._config) is not actions.DesktopMode.HIDDEN:
+            self._set_desktop_mode(actions.DesktopMode.HIDDEN)
 
     def shutdown(self) -> None:
         """Stop adapters and ignore any worker result that arrives later."""
@@ -238,7 +241,7 @@ class WidgetApplication:
         match command:
             case "show":
                 if not self._config.desktop_visible:
-                    self._toggle_desktop_visibility()
+                    self._set_desktop_mode(actions.DesktopMode.NORMAL)
                 else:
                     self._apply_visibility(force=True)
             case "exit":
@@ -258,6 +261,10 @@ class WidgetApplication:
                 self._show_visibility_panel(x, y)
             case "desktop":
                 self._toggle_desktop_visibility()
+            case "desktop_normal":
+                self._set_desktop_mode(actions.DesktopMode.NORMAL)
+            case "desktop_hidden":
+                self._set_desktop_mode(actions.DesktopMode.HIDDEN)
             case "mini":
                 self._toggle_mini()
             case "taskbar":
@@ -422,6 +429,9 @@ class WidgetApplication:
     def _toggle_mini(self) -> None:
         self._save_and_render(actions.toggle_mini_mode(self._config))
 
+    def _set_desktop_mode(self, mode: actions.DesktopMode) -> None:
+        self._save_and_render(actions.set_desktop_mode(self._config, mode))
+
     def _toggle_desktop_visibility(self) -> None:
         self._save_and_render(actions.toggle_desktop_visibility(self._config))
 
@@ -451,12 +461,12 @@ class WidgetApplication:
             self.refresh,
             self._toggle_theme,
             self._show_opacity,
-            self._toggle_mini,
-            self._toggle_desktop_visibility,
+            lambda: self._set_desktop_mode(actions.DesktopMode.NORMAL),
+            lambda: self._set_desktop_mode(actions.DesktopMode.MINI),
+            lambda: self._set_desktop_mode(actions.DesktopMode.HIDDEN),
             self._toggle_taskbar_visibility,
             self._toggle_topmost,
             self._toggle_auto_update,
-            self.hide,
             self.shutdown,
             self._set_scale,
             self._set_pet,

@@ -52,31 +52,33 @@ def test_remaining_severity_matches_approved_thresholds() -> None:
     assert remaining_severity(50.1) == "green"
 
 
-def test_full_and_mini_render_exact_css_sizes_at_100_and_150_percent() -> None:
+def test_full_uses_70_percent_base_while_mini_keeps_its_existing_size() -> None:
     model = _model(_state())
     full = render_desktop_card(model, mode="full", light_theme=True)
     full_150 = render_desktop_card(model, mode="full", light_theme=False, scale=1.5)
     mini = render_desktop_card(model, mode="mini", light_theme=True)
     mini_150 = render_desktop_card(model, mode="mini", light_theme=False, scale=1.5)
-    assert full.image.size == (280, 156)
-    assert full_150.image.size == (420, 234)
+    assert full.image.size == (196, 109)
+    assert full_150.image.size == (294, 164)
     assert mini.image.size == (244, 46)
     assert mini_150.image.size == (366, 69)
+    assert (full.logical_width, full.logical_height) == (196, 109)
+    assert (mini.logical_width, mini.logical_height) == (244, 46)
     assert full.image.mode == mini.image.mode == "RGBA"
 
 
 def test_track_centers_are_solid_approved_colors_without_resampling_tails() -> None:
     rendered = render_desktop_card(_model(_state()), mode="full", light_theme=True)
     palette = card_palette(True)
-    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((20, 89)))[:3] == (
+    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((14, 62)))[:3] == (
         24,
         134,
         75,
     )
-    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((250, 89)))[
+    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((175, 62)))[
         :3
     ] == (223, 230, 239)
-    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((20, 135)))[
+    assert cast("tuple[int, int, int, int]", rendered.image.getpixel((14, 95)))[
         :3
     ] == (194, 118, 18)
     assert palette.green == "#18864b"
@@ -88,7 +90,7 @@ def test_status_state_grows_only_full_card_and_remains_privacy_safe() -> None:
     full = render_desktop_card(model, mode="full", light_theme=True)
     mini = render_desktop_card(model, mode="mini", light_theme=True)
     assert model.status_text == "Codex 사용량을 불러올 수 없습니다."
-    assert full.image.size == (280, 178)
+    assert full.image.size == (196, 125)
     assert mini.image.size == (244, 46)
 
 
@@ -97,8 +99,8 @@ def test_hit_regions_scale_with_the_rendered_pixels() -> None:
     full = render_desktop_card(model, mode="full", light_theme=True, scale=1.5)
     mini = render_desktop_card(model, mode="mini", light_theme=True, scale=1.5)
     assert full.hit_regions.brand is not None
-    assert full.hit_regions.brand.contains(30, 30)
-    assert full.hit_regions.mode.contains(320, 35)
+    assert full.hit_regions.brand.contains(21, 21)
+    assert full.hit_regions.mode.contains(220, 35)
     assert mini.hit_regions.brand is None
     assert mini.hit_regions.mode.contains(330, 30)
 
@@ -121,7 +123,7 @@ def test_full_card_keeps_additional_actual_windows_and_grows_per_row() -> None:
     mini = render_desktop_card(model, mode="mini", light_theme=True)
 
     assert len(model.rows) == 3
-    assert full.image.size == (280, 202)
+    assert full.image.size == (196, 141)
     assert mini.image.size == (244, 46)
 
 

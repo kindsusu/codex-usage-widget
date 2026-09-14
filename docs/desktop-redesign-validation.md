@@ -19,8 +19,8 @@ updated the documentation and Obsidian records.
   click on the tray icon. The advanced menu was opened with physical right-click;
   its theme command was invoked directly to verify callback execution.
 - Light and dark full/mini/panel screenshots were captured from the actual app.
-  At 150% Windows DPI, full is **420×234**, mini **366×69**, and panel **438×328**.
-  Applying 150% user scale to the full card produces **630×351**, once per scale.
+  At 150% Windows DPI, full is **294×164**, while mini remains **366×69** and the panel remains **438×328**.
+  Applying 150% user scale at 150% Windows DPI produces **441×246**, once per scale.
 - Physical dragging moved the card and persisted the new position. Separate
   regression tests cover releasing a body drag over a button without invoking it.
 - The user's original configuration was unchanged during verification.

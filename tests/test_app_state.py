@@ -5,8 +5,11 @@ import pytest
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import ThemeName, WidgetConfig
 from codex_usage_widget.app import (
+    DesktopMode,
     MenuCommand,
     build_menu_model,
+    desktop_mode,
+    set_desktop_mode,
     set_opacity,
     set_pet,
     set_scale,
@@ -80,8 +83,29 @@ def test_mini_toggle_reveals_a_hidden_desktop_widget() -> None:
 
     shown = toggle_mini_mode(hidden)
 
-    assert shown.mini_mode is False
+    assert shown.mini_mode is True
     assert shown.desktop_visible is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "visible", "mini"),
+    [
+        (DesktopMode.NORMAL, True, False),
+        (DesktopMode.MINI, True, True),
+        (DesktopMode.HIDDEN, False, False),
+    ],
+)
+def test_set_desktop_mode_writes_one_canonical_state(
+    mode: DesktopMode, visible: bool, mini: bool
+) -> None:
+    config = WidgetConfig(taskbar_visible=False, desktop_visible=False, mini_mode=True)
+
+    updated = set_desktop_mode(config, mode)
+
+    assert updated.desktop_visible is visible
+    assert updated.mini_mode is mini
+    assert updated.taskbar_visible is False
+    assert desktop_mode(updated) is mode
 
 
 def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:
@@ -104,9 +128,10 @@ def test_menu_model_exposes_plain_korean_labels_and_checked_state() -> None:
     labels = {item.command: item.label for item in model}
     assert labels[MenuCommand.REFRESH] == "새로고침"
     assert labels[MenuCommand.THEME] == "다크/라이트 전환"
-    assert labels[MenuCommand.MINI] == "미니모드"
+    assert labels[MenuCommand.DESKTOP_VISIBILITY] == "데스크톱 일반 모드"
+    assert labels[MenuCommand.MINI] == "데스크톱 미니 모드"
     assert labels[MenuCommand.SMART_TOPMOST] == "스마트 포지션 스위칭"
-    assert labels[MenuCommand.HIDE] == "트레이로 숨기기"
+    assert labels[MenuCommand.HIDE] == "데스크톱 숨기기"
     assert labels[MenuCommand.EXIT] == "종료"
     # No accelerator/shortcut hints remain in any label.
     assert all("Ctrl" not in item.label and "\t" not in item.label for item in model)
@@ -134,6 +159,7 @@ def test_menu_model_checked_flags_track_every_toggle(
     checked = {item.command: item.checked for item in build_menu_model(config)}
 
     # Then each toggle row mirrors its live config field...
+    assert checked[MenuCommand.DESKTOP_VISIBILITY] is (not mini)
     assert checked[MenuCommand.MINI] is mini
     assert checked[MenuCommand.SMART_TOPMOST] is smart
     assert checked[MenuCommand.THEME] is dark

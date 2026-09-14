@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from PIL import Image
 
+from codex_usage_widget.actions import DesktopMode
 from codex_usage_widget.assets import load_tray_png
 
 if TYPE_CHECKING:
@@ -32,12 +33,12 @@ class _TrayEvent(Protocol):
 class TrayCallbacks:
     """Optional tray commands and live checked-state providers."""
 
-    toggle_desktop: Callable[[], None]
-    toggle_mini: Callable[[], None]
+    desktop_normal: Callable[[], None]
+    desktop_mini: Callable[[], None]
+    desktop_hidden: Callable[[], None]
     toggle_taskbar: Callable[[], None]
     show_details: Callable[[], None]
-    desktop_checked: Callable[[], bool]
-    mini_checked: Callable[[], bool]
+    desktop_mode: Callable[[], DesktopMode]
     taskbar_checked: Callable[[], bool]
     refresh: Callable[[], None]
 
@@ -61,21 +62,21 @@ class TrayController:
         self._show = show
         self._exit = exit_app
         resolved = callbacks or TrayCallbacks(
-            toggle_desktop=show,
-            toggle_mini=lambda: None,
+            desktop_normal=show,
+            desktop_mini=lambda: None,
+            desktop_hidden=lambda: None,
             toggle_taskbar=lambda: None,
             show_details=show,
-            desktop_checked=lambda: True,
-            mini_checked=lambda: False,
+            desktop_mode=lambda: DesktopMode.NORMAL,
             taskbar_checked=lambda: False,
             refresh=lambda: None,
         )
-        self._toggle_desktop = resolved.toggle_desktop
-        self._toggle_mini = resolved.toggle_mini
+        self._desktop_normal = resolved.desktop_normal
+        self._desktop_mini = resolved.desktop_mini
+        self._desktop_hidden = resolved.desktop_hidden
         self._toggle_taskbar = resolved.toggle_taskbar
         self._show_details = resolved.show_details
-        self._desktop_checked = resolved.desktop_checked
-        self._mini_checked = resolved.mini_checked
+        self._desktop_mode = resolved.desktop_mode
         self._taskbar_checked = resolved.taskbar_checked
         self._refresh = resolved.refresh
         self._icon = None
@@ -96,14 +97,22 @@ class TrayController:
         menu = pystray.Menu(
             pystray.MenuItem("사용량 상세", self._on_details, default=True),
             pystray.MenuItem(
-                "데스크톱 표시",
-                self._on_toggle_desktop,
-                checked=lambda _item: self._desktop_checked(),
+                "데스크톱 일반 모드",
+                self._on_desktop_normal,
+                checked=lambda _item: self._desktop_mode() is DesktopMode.NORMAL,
+                radio=True,
             ),
             pystray.MenuItem(
-                "데스크톱 미니모드",
-                self._on_toggle_mini,
-                checked=lambda _item: self._mini_checked(),
+                "데스크톱 미니 모드",
+                self._on_desktop_mini,
+                checked=lambda _item: self._desktop_mode() is DesktopMode.MINI,
+                radio=True,
+            ),
+            pystray.MenuItem(
+                "데스크톱 숨기기",
+                self._on_desktop_hidden,
+                checked=lambda _item: self._desktop_mode() is DesktopMode.HIDDEN,
+                radio=True,
             ),
             pystray.MenuItem(
                 "작업표시줄 표시",
@@ -161,11 +170,14 @@ class TrayController:
     def _on_details(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
         self._show_details()
 
-    def _on_toggle_desktop(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
-        self._toggle_desktop()
+    def _on_desktop_normal(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
+        self._desktop_normal()
 
-    def _on_toggle_mini(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
-        self._toggle_mini()
+    def _on_desktop_mini(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
+        self._desktop_mini()
+
+    def _on_desktop_hidden(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
+        self._desktop_hidden()
 
     def _on_toggle_taskbar(self, _icon: _TrayEvent, _item: _TrayEvent) -> None:
         self._toggle_taskbar()

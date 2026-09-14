@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Final, final
 
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+from codex_usage_widget.actions import DesktopMode, desktop_mode
 from codex_usage_widget.assets import load_tray_png
 from codex_usage_widget.card_tokens import card_palette
 from codex_usage_widget.taskbar_details import bounded_popup_position, monitor_metrics
@@ -28,20 +29,21 @@ if TYPE_CHECKING:
     from codex_usage_widget.config import WidgetConfig
 
 _WIDTH: Final = 292
-_HEIGHT: Final = 218.25
+_HEIGHT: Final = 258.25
 _ROW_TOP: Final = 46
 _ROW_HEIGHT: Final = 40
-_ROW_COUNT: Final = 3
+_ROW_COUNT: Final = 4
 _FONT_ROOT: Final = Path("C:/Windows/Fonts")
 _SUPERSAMPLE: Final = 3
 
 
 @dataclass(frozen=True, slots=True)
 class VisibilityCallbacks:
-    """Commands emitted by the three visibility rows."""
+    """Commands emitted by the exclusive desktop and taskbar rows."""
 
-    desktop: Callable[[], None]
+    normal: Callable[[], None]
     mini: Callable[[], None]
+    hidden: Callable[[], None]
     taskbar: Callable[[], None]
     trigger_contains: Callable[[int, int], bool]
 
@@ -177,12 +179,14 @@ class VisibilityPanel:
         if icon is not None:
             image.alpha_composite(icon, (px(17), px(19)))
         _text(draw, (40, 27), "Codex 사용량", 12, True, render_scale, palette.muted)
+        mode = desktop_mode(config)
         rows = (
-            ("바탕화면 위젯 표시", config.desktop_visible),
-            ("바탕화면 미니 모드", config.mini_mode),
-            ("작업표시줄 위젯 표시", config.taskbar_visible),
+            ("바탕화면 일반 모드", mode is DesktopMode.NORMAL, True),
+            ("바탕화면 미니 모드", mode is DesktopMode.MINI, True),
+            ("바탕화면 숨기기", mode is DesktopMode.HIDDEN, True),
+            ("작업표시줄 위젯 표시", config.taskbar_visible, False),
         )
-        for index, (label, checked) in enumerate(rows):
+        for index, (label, checked, radio) in enumerate(rows):
             top = _ROW_TOP + index * _ROW_HEIGHT
             if self._hover == index:
                 draw.rounded_rectangle(
@@ -196,14 +200,34 @@ class VisibilityPanel:
                     fill=hover,
                 )
             x1, y1, size = px(17), px(top + 12), px(16)
-            draw.rounded_rectangle(
-                (x1, y1, x1 + size, y1 + size),
-                radius=max(1, px(2)),
-                fill=palette.green if checked else palette.track,
-                outline=palette.green if checked else palette.muted,
-                width=max(1, px(1)),
-            )
-            if checked:
+            control_box = (x1, y1, x1 + size, y1 + size)
+            if radio:
+                draw.ellipse(
+                    control_box,
+                    fill=palette.track,
+                    outline=palette.green if checked else palette.muted,
+                    width=max(1, px(1)),
+                )
+                if checked:
+                    inset = px(4)
+                    draw.ellipse(
+                        (
+                            x1 + inset,
+                            y1 + inset,
+                            x1 + size - inset,
+                            y1 + size - inset,
+                        ),
+                        fill=palette.green,
+                    )
+            else:
+                draw.rounded_rectangle(
+                    control_box,
+                    radius=max(1, px(2)),
+                    fill=palette.green if checked else palette.track,
+                    outline=palette.green if checked else palette.muted,
+                    width=max(1, px(1)),
+                )
+            if checked and not radio:
                 draw.line(
                     (
                         x1 + px(3), y1 + px(8),
@@ -216,12 +240,12 @@ class VisibilityPanel:
                 )
             _text(draw, (43, top + 20), label, 13, False, render_scale, palette.text)
         draw.line(
-            (px(17), px(171), render_width - px(17), px(171)),
+            (px(17), px(211), render_width - px(17), px(211)),
             fill=line,
             width=px(1),
         )
-        note = _visibility_note(config.desktop_visible, config.taskbar_visible)
-        _text(draw, (17, 194), note, 11, False, render_scale, palette.muted)
+        note = _visibility_note(mode, config.taskbar_visible)
+        _text(draw, (17, 234), note, 11, False, render_scale, palette.muted)
         image = image.resize((width, height), Image.Resampling.LANCZOS)
         image.putalpha(_panel_mask(width, height, round(12 * scale)))
         self._icon = ImageTk.PhotoImage(image, master=canvas)
@@ -254,8 +278,9 @@ class VisibilityPanel:
         row = self._row_at(event.y)
         if row is not None:
             callbacks = (
-                self._callbacks.desktop,
+                self._callbacks.normal,
                 self._callbacks.mini,
+                self._callbacks.hidden,
                 self._callbacks.taskbar,
             )
             callbacks[row]()
@@ -301,14 +326,14 @@ class VisibilityPanel:
             _ = hide_from_taskbar(window.winfo_id())
 
 
-def _visibility_note(desktop: bool, taskbar: bool) -> str:
-    if desktop and taskbar:
-        return "두 위치에 표시 중"
-    if desktop:
-        return "바탕화면에만 표시 중"
-    if taskbar:
-        return "작업표시줄에만 표시 중"
-    return "트레이에서 다시 표시할 수 있음"
+def _visibility_note(mode: DesktopMode, taskbar: bool) -> str:
+    surface = {
+        DesktopMode.NORMAL: "일반 위젯",
+        DesktopMode.MINI: "미니 위젯",
+        DesktopMode.HIDDEN: "바탕화면 숨김",
+    }[mode]
+    taskbar_text = "작업표시줄 표시" if taskbar else "작업표시줄 숨김"
+    return f"{surface} · {taskbar_text}"
 
 
 def _left_button_state() -> int:

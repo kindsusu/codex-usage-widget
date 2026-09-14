@@ -6,9 +6,12 @@ import sys
 from typing import TYPE_CHECKING
 
 from codex_usage_widget.actions import (
+    DesktopMode,
     MenuCommand,
     MenuItemModel,
     build_menu_model,
+    desktop_mode,
+    set_desktop_mode,
     set_opacity,
     set_pet,
     set_scale,
@@ -24,10 +27,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "DesktopMode",
     "MenuCommand",
     "MenuItemModel",
     "build_menu_model",
+    "desktop_mode",
     "main",
+    "set_desktop_mode",
     "set_opacity",
     "set_pet",
     "set_scale",

@@ -20,6 +20,14 @@ class MenuCommand(StrEnum):
     EXIT = "exit"
 
 
+class DesktopMode(StrEnum):
+    """The single requested state of the desktop widget surface."""
+
+    NORMAL = "normal"
+    MINI = "mini"
+    HIDDEN = "hidden"
+
+
 @dataclass(frozen=True, slots=True)
 class MenuItemModel:
     """Display-independent context-menu item."""
@@ -60,8 +68,27 @@ def toggle_mini_mode(config: WidgetConfig) -> WidgetConfig:
     hidden only flips a checkbox: the window silently changes size behind the
     scenes and the user sees nothing happen (2026-09-14 bug report).
     """
+    target = (
+        DesktopMode.NORMAL
+        if desktop_mode(config) is DesktopMode.MINI
+        else DesktopMode.MINI
+    )
+    return set_desktop_mode(config, target)
+
+
+def desktop_mode(config: WidgetConfig) -> DesktopMode:
+    """Resolve legacy visibility flags into one mutually exclusive state."""
+    if not config.desktop_visible:
+        return DesktopMode.HIDDEN
+    return DesktopMode.MINI if config.mini_mode else DesktopMode.NORMAL
+
+
+def set_desktop_mode(config: WidgetConfig, mode: DesktopMode) -> WidgetConfig:
+    """Select one canonical desktop state without changing taskbar visibility."""
     return replace(
-        config, mini_mode=not config.mini_mode, desktop_visible=True
+        config,
+        desktop_visible=mode is not DesktopMode.HIDDEN,
+        mini_mode=mode is DesktopMode.MINI,
     )
 
 
@@ -71,8 +98,13 @@ def toggle_smart_topmost(config: WidgetConfig) -> WidgetConfig:
 
 
 def toggle_desktop_visibility(config: WidgetConfig) -> WidgetConfig:
-    """Flip whether the regular desktop widget surface is shown."""
-    return replace(config, desktop_visible=not config.desktop_visible)
+    """Toggle between the normal desktop surface and the hidden state."""
+    target = (
+        DesktopMode.NORMAL
+        if desktop_mode(config) is DesktopMode.HIDDEN
+        else DesktopMode.HIDDEN
+    )
+    return set_desktop_mode(config, target)
 
 
 def toggle_taskbar_visibility(config: WidgetConfig) -> WidgetConfig:
@@ -94,22 +126,30 @@ def build_menu_model(config: WidgetConfig) -> tuple[MenuItemModel, ...]:
             "다크/라이트 전환",
             checked=config.theme is ThemeName.DARK,
         ),
-        MenuItemModel(MenuCommand.MINI, "미니모드", checked=config.mini_mode),
+        MenuItemModel(
+            MenuCommand.DESKTOP_VISIBILITY,
+            "데스크톱 일반 모드",
+            checked=desktop_mode(config) is DesktopMode.NORMAL,
+        ),
+        MenuItemModel(
+            MenuCommand.MINI,
+            "데스크톱 미니 모드",
+            checked=desktop_mode(config) is DesktopMode.MINI,
+        ),
         MenuItemModel(
             MenuCommand.SMART_TOPMOST,
             "스마트 포지션 스위칭",
             checked=config.smart_topmost,
         ),
         MenuItemModel(
-            MenuCommand.DESKTOP_VISIBILITY,
-            "바탕화면 위젯 표시",
-            checked=config.desktop_visible,
-        ),
-        MenuItemModel(
             MenuCommand.TASKBAR_VISIBILITY,
             "작업표시줄 표시",
             checked=config.taskbar_visible,
         ),
-        MenuItemModel(MenuCommand.HIDE, "트레이로 숨기기"),
+        MenuItemModel(
+            MenuCommand.HIDE,
+            "데스크톱 숨기기",
+            checked=desktop_mode(config) is DesktopMode.HIDDEN,
+        ),
         MenuItemModel(MenuCommand.EXIT, "종료"),
     )
