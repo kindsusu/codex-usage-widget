@@ -73,6 +73,7 @@ class _PollTaskbar:
     def __init__(self) -> None:
         self.attached: bool = True
         self.visibility: list[bool] = []
+        self.host_fallback: bool = False
 
     def set_visible(self, _visible: bool) -> None:
         self.visibility.append(_visible)

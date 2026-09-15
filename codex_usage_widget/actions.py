@@ -4,7 +4,12 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from codex_usage_widget.assets import PET_NAMES
-from codex_usage_widget.config import ThemeName, WidgetConfig
+from codex_usage_widget.config import (
+    TaskbarHost,
+    TaskbarZone,
+    ThemeName,
+    WidgetConfig,
+)
 
 
 class MenuCommand(StrEnum):
@@ -105,6 +110,27 @@ def toggle_desktop_visibility(config: WidgetConfig) -> WidgetConfig:
         else DesktopMode.HIDDEN
     )
     return set_desktop_mode(config, target)
+
+
+def set_taskbar_placement(
+    config: WidgetConfig,
+    *,
+    zone: TaskbarZone,
+    host: TaskbarHost,
+    monitor: str = "",
+) -> WidgetConfig:
+    """Move the taskbar strip to one end of one taskbar.
+
+    SHARED STRIP CONTRACT -- mirrored in the Claude widget. The monitor device
+    name is only meaningful for a secondary host and is cleared otherwise, so a
+    later reconnect cannot resurrect a stale screen.
+    """
+    return replace(
+        config,
+        taskbar_zone=zone,
+        taskbar_host=host,
+        taskbar_host_monitor=monitor if host is TaskbarHost.SECONDARY else "",
+    )
 
 
 def toggle_taskbar_visibility(config: WidgetConfig) -> WidgetConfig:

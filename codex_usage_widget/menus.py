@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING, final
 from codex_usage_widget import __version__
 from codex_usage_widget.actions import DesktopMode, desktop_mode
 from codex_usage_widget.assets import PET_NAMES
-from codex_usage_widget.config import ThemeName, WidgetConfig
+from codex_usage_widget.config import (
+    TaskbarHost,
+    TaskbarZone,
+    ThemeName,
+    WidgetConfig,
+)
 from codex_usage_widget.taskbar_details import monitor_metrics
 from codex_usage_widget.theme import ThemeTokens, theme_tokens
 
@@ -32,6 +37,10 @@ class MenuCallbacks:
     desktop_mini: Callable[[], None]
     desktop_hidden: Callable[[], None]
     taskbar_visibility: Callable[[], None]
+    # (zone, host) -> move the taskbar strip. SHARED STRIP CONTRACT.
+    taskbar_placement: Callable[[TaskbarZone, TaskbarHost], None]
+    # Whether a secondary taskbar exists right now; disables its menu rows.
+    secondary_taskbar: Callable[[], bool]
     topmost: Callable[[], None]
     auto_update: Callable[[], None]
     exit_app: Callable[[], None]
@@ -182,6 +191,7 @@ def _populate_context_menu(
         command=callbacks.taskbar_visibility,
         variable=taskbar_on,
     )
+    _add_placement_menu(menu, config, callbacks, tokens=tokens, menu_font=menu_font)
     _ = menu.add_checkbutton(
         label="스마트 포지션 스위칭",
         command=callbacks.topmost,
@@ -223,6 +233,44 @@ def opacity_from_position(position: int, track_width: int) -> float:
     """Map a slider coordinate to the supported opacity range."""
     fraction = max(0.0, min(1.0, position / track_width))
     return round(0.3 + fraction * 0.7, 3)
+
+
+_PLACEMENT_ROWS: tuple[tuple[str, TaskbarZone, TaskbarHost], ...] = (
+    ("주 모니터 · 왼쪽", TaskbarZone.LEFT, TaskbarHost.PRIMARY),
+    ("주 모니터 · 오른쪽", TaskbarZone.RIGHT, TaskbarHost.PRIMARY),
+    ("보조 모니터 · 왼쪽", TaskbarZone.LEFT, TaskbarHost.SECONDARY),
+    ("보조 모니터 · 오른쪽", TaskbarZone.RIGHT, TaskbarHost.SECONDARY),
+)
+
+
+def _add_placement_menu(
+    menu: tk.Menu,
+    config: WidgetConfig,
+    callbacks: MenuCallbacks,
+    *,
+    tokens: ThemeTokens,
+    menu_font: tuple[str, int],
+) -> None:
+    """Four fixed destinations for the strip; secondary rows need a second bar."""
+    submenu = _new_menu(menu, tokens, menu_font)
+    has_secondary = callbacks.secondary_taskbar()
+    for label, zone, host in _PLACEMENT_ROWS:
+        current = config.taskbar_zone is zone and config.taskbar_host is host
+        enabled = has_secondary or host is TaskbarHost.PRIMARY
+        _ = submenu.add_command(
+            label=f"{label}{'  ✓' if current else ''}",
+            command=_placement_command(callbacks.taskbar_placement, zone, host),
+            state="normal" if enabled else "disabled",
+        )
+    _ = menu.add_cascade(label="작업표시줄 위치", menu=submenu)
+
+
+def _placement_command(
+    callback: Callable[[TaskbarZone, TaskbarHost], None],
+    zone: TaskbarZone,
+    host: TaskbarHost,
+) -> Callable[[], None]:
+    return lambda: callback(zone, host)
 
 
 def _add_scale_menu(  # noqa: PLR0913 -- shared typography and palette are explicit

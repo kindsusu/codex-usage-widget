@@ -111,6 +111,8 @@ def test_selected_command_remains_alive_until_idle_cleanup(
         desktop_mini=noop,
         desktop_hidden=noop,
         taskbar_visibility=lambda: selected.append("selected"),
+        taskbar_placement=lambda _zone, _host: None,
+        secondary_taskbar=lambda: False,
         topmost=noop,
         auto_update=noop,
         exit_app=noop,

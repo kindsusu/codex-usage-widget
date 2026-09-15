@@ -320,7 +320,9 @@ def test_stopped_observer_does_not_publish_scanned_target(
     host._stop_requested = current_stop
     old_stop.set()
     user32 = FakeUser32()
-    def no_target(_hwnd: int) -> taskbar_native._Target | None:
+    def no_target(
+        _hwnd: int, _placement: taskbar_native.StripPlacement | None = None
+    ) -> taskbar_native._Target | None:
         return None
 
     monkeypatch.setattr(taskbar_native, "_find_target", no_target)
@@ -346,7 +348,9 @@ def test_observer_failure_publishes_none_then_next_scan_recovers(
     )
     scans = iter((RuntimeError(), target))
 
-    def scan(_hwnd: int) -> taskbar_native._Target:
+    def scan(
+        _hwnd: int, _placement: taskbar_native.StripPlacement | None = None
+    ) -> taskbar_native._Target:
         value = next(scans)
         if isinstance(value, Exception):
             raise value

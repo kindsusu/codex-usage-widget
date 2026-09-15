@@ -4,7 +4,11 @@ from collections.abc import Callable
 from typing import final
 
 from codex_usage_widget.taskbar_model import TaskbarModel
-from codex_usage_widget.taskbar_native import NativeTaskbarHost
+from codex_usage_widget.taskbar_native import (
+    NativeTaskbarHost,
+    StripPlacement,
+)
+from codex_usage_widget.taskbar_placement import DropDecision
 
 
 @final
@@ -16,9 +20,10 @@ class TaskbarController:
         on_details: Callable[[int, int], None],
         on_visibility: Callable[[int, int], None],
         on_menu: Callable[[int, int], None],
+        on_move: Callable[[DropDecision], None] | None = None,
     ) -> None:
         """Bind screen-coordinate callbacks without starting native work."""
-        self._host = NativeTaskbarHost(on_details, on_visibility, on_menu)
+        self._host = NativeTaskbarHost(on_details, on_visibility, on_menu, on_move)
 
     @property
     def available(self) -> bool:
@@ -39,9 +44,18 @@ class TaskbarController:
         """Start the bounded native worker; repeated calls are safe."""
         return self._host.start()
 
+    @property
+    def host_fallback(self) -> bool:
+        """Whether the strip currently sits on a fallback taskbar."""
+        return self._host.host_fallback
+
     def set_visible(self, visible: bool) -> None:
         """Request visibility without blocking the caller."""
         self._host.set_visible(visible)
+
+    def set_placement(self, placement: StripPlacement) -> None:
+        """Publish new saved placement settings to the native worker."""
+        self._host.set_placement(placement)
 
     def update(self, model: TaskbarModel) -> None:
         """Publish the latest immutable render model."""
@@ -60,4 +74,4 @@ class TaskbarController:
         self._host.stop()
 
 
-__all__ = ["TaskbarController", "TaskbarModel"]
+__all__ = ["StripPlacement", "TaskbarController", "TaskbarModel"]

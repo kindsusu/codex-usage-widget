@@ -12,7 +12,7 @@ import importlib
 import sys
 from contextlib import suppress
 from ctypes import wintypes
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from threading import Event, Lock, Thread, get_ident
 from typing import TYPE_CHECKING, Final, Literal, Protocol, final
 
@@ -23,11 +23,17 @@ if TYPE_CHECKING:
 
     from codex_usage_widget.taskbar_render import HitRegion
 
+from codex_usage_widget.config import TaskbarHost, TaskbarZone
 from codex_usage_widget.taskbar_model import TaskbarModel
 from codex_usage_widget.taskbar_placement import (
     LEADING_BAND,
+    DropDecision,
     Rect,
     TaskbarGeometry,
+    TaskbarHostCandidate,
+    choose_host,
+    clamp_to_host,
+    decide_drop,
     logical_pixels,
     place_taskbar_widget,
 )
@@ -39,6 +45,8 @@ WM_LBUTTONUP: Final = 0x0202
 WM_RBUTTONUP: Final = 0x0205
 WM_MOUSEMOVE: Final = 0x0200
 WM_MOUSELEAVE: Final = 0x02A3
+WM_LBUTTONDOWN: Final = 0x0201
+WM_CAPTURECHANGED: Final = 0x0215
 WM_APP_UPDATE: Final = 0x8001
 WM_APP_VISIBILITY: Final = 0x8002
 WM_APP_STOP: Final = 0x8003
@@ -54,6 +62,7 @@ ULW_ALPHA: Final = 0x2
 SW_HIDE: Final = 0
 SW_SHOWNOACTIVATE: Final = 4
 SWP_NOACTIVATE: Final = 0x0010
+SWP_NOZORDER: Final = 0x0004
 SWP_FRAMECHANGED: Final = 0x0020
 SPI_GETHIGHCONTRAST: Final = 0x0042
 HCF_HIGHCONTRASTON: Final = 0x1
@@ -64,6 +73,12 @@ SIBLING_CLASS_PREFIXES: Final = ("CodexUsageTaskbar", "ClaudeUsageTaskbarSurface
 _COINIT_MULTITHREADED: Final = 0
 _RPC_E_CHANGED_MODE: Final = -2_147_417_850
 _TME_LEAVE: Final = 0x2
+_SM_CXDRAG: Final = 68
+_SM_CYDRAG: Final = 69
+_VK_ESCAPE: Final = 0x1B
+_GA_ROOT: Final = 2
+_MONITOR_DEFAULTTONULL: Final = 0
+_SECONDARY_TASKBAR_CLASS: Final = "Shell_SecondaryTrayWnd"
 _AC_SRC_ALPHA: Final = 0x1
 _DIB_RGB_COLORS: Final = 0
 _UIA_BUTTON_CONTROL_TYPE: Final = 50_000
@@ -166,6 +181,17 @@ class _BITMAPINFO(ctypes.Structure):
 
 
 @final
+class _MONITORINFOEXW(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", _RECT),
+        ("rcWork", _RECT),
+        ("dwFlags", wintypes.DWORD),
+        ("szDevice", wintypes.WCHAR * 32),
+    ]
+
+
+@final
 class _TRACKMOUSEEVENT(ctypes.Structure):
     _fields_ = [
         ("cbSize", wintypes.DWORD),
@@ -209,11 +235,85 @@ def attach_transaction(
 
 
 @dataclass(frozen=True, slots=True)
+class StripPlacement:
+    """Where the strip wants to live, straight from the saved settings.
+
+    SHARED STRIP CONTRACT -- mirrored in the Claude widget.
+    """
+
+    zone: TaskbarZone = TaskbarZone.LEFT
+    host: TaskbarHost = TaskbarHost.PRIMARY
+    monitor: str = ""
+    claim_edge: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class _Target:
     parent: int
     bounds: Rect
     placement: Rect
     dpi: int
+    # True when the requested host was missing and we fell back to the primary
+    # taskbar; the saved setting is deliberately left alone.
+    host_fallback: bool = False
+    # True while we are still holding a slot a sibling has not vacated yet.
+    claiming: bool = False
+
+
+def taskbar_hosts() -> tuple[TaskbarHostCandidate, ...]:
+    """Every taskbar window we could embed into, primary first."""
+    user32 = _user32()
+    found: list[TaskbarHostCandidate] = []
+    primary = int(user32.FindWindowW("Shell_TrayWnd", None) or 0)
+    if primary:
+        bounds = _window_rect(primary)
+        if bounds is not None:
+            found.append(
+                TaskbarHostCandidate(
+                    primary, bounds, _monitor_device(primary), primary=True
+                )
+            )
+    handle = wintypes.HWND(0)
+    while True:
+        handle = user32.FindWindowExW(
+            None, handle, _SECONDARY_TASKBAR_CLASS, None
+        )
+        if not handle:
+            break
+        secondary = int(handle)
+        bounds = _window_rect(secondary)
+        if bounds is not None and bounds.width > 0:
+            found.append(
+                TaskbarHostCandidate(secondary, bounds, _monitor_device(secondary))
+            )
+    return tuple(found)
+
+
+def _monitor_device(hwnd: int) -> str:
+    """Device name of the monitor a window sits on, or "" when unknown."""
+    user32 = _user32()
+    monitor = user32.MonitorFromWindow(hwnd, _MONITOR_DEFAULTTONULL)
+    if not monitor:
+        return ""
+    info = _MONITORINFOEXW()
+    info.cbSize = ctypes.sizeof(_MONITORINFOEXW)
+    if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+        return ""
+    return str(info.szDevice)
+
+
+def host_under_point(x: int, y: int) -> int:
+    """Handle of the taskbar window under a screen point, or zero."""
+    user32 = _user32()
+    window = user32.WindowFromPoint(wintypes.POINT(x, y))
+    if not window:
+        return 0
+    root = user32.GetAncestor(window, _GA_ROOT) or window
+    name = ctypes.create_unicode_buffer(128)
+    _ = user32.GetClassNameW(root, name, len(name))
+    if name.value in ("Shell_TrayWnd", _SECONDARY_TASKBAR_CLASS):
+        return int(root)
+    return 0
 
 
 @final
@@ -225,11 +325,15 @@ class NativeTaskbarHost:
         on_details: Callable[[int, int], None],
         on_visibility: Callable[[int, int], None],
         on_menu: Callable[[int, int], None] | None = None,
+        on_move: Callable[[DropDecision], None] | None = None,
     ) -> None:
         """Bind callbacks and initialize thread-safe state."""
         self._on_details = on_details
         self._on_visibility = on_visibility
         self._on_menu = on_visibility if on_menu is None else on_menu
+        self._on_move: Callable[[DropDecision], None] = (
+            (lambda _decision: None) if on_move is None else on_move
+        )
         self._lock = Lock()
         self._ready = Event()
         self._stop_requested = Event()
@@ -246,6 +350,12 @@ class NativeTaskbarHost:
         self._hover_region: Literal["usage", "menu"] | None = None
         self._suppress_menu_release = False
         self._observed_target: _Target | None = None
+        self._placement = StripPlacement()
+        # Drag state: press point, the window rect at press time, and whether
+        # the pointer has passed the system drag threshold yet.
+        self._press: tuple[int, int] | None = None
+        self._press_rect: Rect | None = None
+        self._dragging = False
 
     @property
     def available(self) -> bool:
@@ -264,6 +374,23 @@ class NativeTaskbarHost:
         """Return the owned HWND, or zero before initialization."""
         with self._lock:
             return self._hwnd
+
+    @property
+    def host_fallback(self) -> bool:
+        """Return whether the strip sits on a fallback taskbar right now."""
+        with self._lock:
+            target = self._observed_target
+        return target is not None and target.host_fallback
+
+    def set_placement(self, placement: StripPlacement) -> None:
+        """Ask the worker to re-embed according to new saved settings."""
+        with self._lock:
+            if placement == self._placement:
+                return
+            self._placement = placement
+            hwnd = self._hwnd
+        if hwnd:
+            _ = _user32().PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
 
     def start(self) -> bool:
         """Start once; wait only for the bounded initial thread bootstrap."""
@@ -449,8 +576,17 @@ class NativeTaskbarHost:
             return 0
         if message == WM_ERASEBKGND:
             return 1
+        if message == WM_LBUTTONDOWN:
+            self._begin_press(hwnd)
+            return 0
         if message == WM_MOUSEMOVE:
+            if self._handle_drag_move(hwnd):
+                return 0
             self._handle_mouse_move(hwnd, lparam)
+            return 0
+        if message == WM_CAPTURECHANGED:
+            # Someone took the capture away: treat it as a cancelled drag.
+            self._cancel_drag(hwnd)
             return 0
         if message == WM_MOUSELEAVE:
             with self._lock:
@@ -459,6 +595,8 @@ class NativeTaskbarHost:
             return 0
         if message in (WM_LBUTTONUP, WM_RBUTTONUP):
             if message == WM_LBUTTONUP:
+                if self._finish_drag(hwnd):
+                    return 0                 # it was a drag, not a click
                 with self._lock:
                     suppress_release = self._suppress_menu_release
                     self._suppress_menu_release = False
@@ -496,6 +634,108 @@ class NativeTaskbarHost:
             user32.PostQuitMessage(0)
             return 0
         return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+    def _begin_press(self, hwnd: int) -> None:
+        """Remember where a left press started; the move decides the rest."""
+        user32 = _user32()
+        point = wintypes.POINT()
+        if not user32.GetCursorPos(ctypes.byref(point)):
+            return
+        rect = _window_rect(hwnd)
+        with self._lock:
+            self._press = (point.x, point.y)
+            self._press_rect = rect
+            self._dragging = False
+        _ = user32.SetCapture(hwnd)
+
+    def _handle_drag_move(self, hwnd: int) -> bool:
+        """Move the strip with the pointer. True once a drag is under way."""
+        user32 = _user32()
+        with self._lock:
+            press, rect = self._press, self._press_rect
+            dragging = self._dragging
+        if press is None or rect is None:
+            return False
+        if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8000:
+            self._cancel_drag(hwnd)
+            return True
+        point = wintypes.POINT()
+        if not user32.GetCursorPos(ctypes.byref(point)):
+            return dragging
+        moved_x = abs(point.x - press[0])
+        moved_y = abs(point.y - press[1])
+        if not dragging:
+            if (
+                moved_x < user32.GetSystemMetrics(_SM_CXDRAG)
+                and moved_y < user32.GetSystemMetrics(_SM_CYDRAG)
+            ):
+                return False                  # still a click, not a drag
+            with self._lock:
+                self._dragging = True
+                self._suppress_menu_release = False
+        host = _window_rect(int(user32.GetParent(hwnd) or 0))
+        moved = Rect(
+            rect.left + point.x - press[0],
+            rect.top,
+            rect.right + point.x - press[0],
+            rect.bottom,
+        )
+        if host is not None:
+            moved = clamp_to_host(moved, host)
+        _ = user32.SetWindowPos(
+            hwnd,
+            None,
+            moved.left,
+            moved.top,
+            moved.width,
+            moved.height,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        )
+        return True
+
+    def _finish_drag(self, hwnd: int) -> bool:
+        """Release a drag and report the drop. True when a drag was handled."""
+        with self._lock:
+            pressed = self._press is not None
+            dragging = self._dragging
+            self._press = None
+            self._press_rect = None
+            self._dragging = False
+        if not pressed and not dragging:
+            return False                      # a synthetic release: nothing held
+        user32 = _user32()
+        _ = user32.ReleaseCapture()
+        if not dragging:
+            return False
+        point = wintypes.POINT()
+        if user32.GetCursorPos(ctypes.byref(point)):
+            decision = decide_drop(
+                (point.x, point.y),
+                taskbar_hosts(),
+                siblings=sibling_surface_rects(
+                    int(user32.GetParent(hwnd) or 0), hwnd
+                ),
+            )
+            if decision is not None:
+                with suppress(Exception):
+                    self._on_move(decision)
+        # Either way, snap back to a computed placement instead of the
+        # free-hand position the pointer left behind.
+        _ = user32.PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
+        return True
+
+    def _cancel_drag(self, hwnd: int) -> None:
+        """Abandon a drag (Esc, lost capture) and restore the placement."""
+        with self._lock:
+            dragging = self._dragging
+            self._press = None
+            self._press_rect = None
+            self._dragging = False
+        if not dragging:
+            return
+        user32 = _user32()
+        _ = user32.ReleaseCapture()
+        _ = user32.PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
 
     def _handle_mouse_move(self, hwnd: int, lparam: int) -> None:
         x = ctypes.c_short(lparam & 0xFFFF).value
@@ -558,12 +798,18 @@ class NativeTaskbarHost:
                 return
 
     def _observe_once(self, hwnd: int, stop_event: Event, generation: int) -> bool:
+        with self._lock:
+            placement = self._placement
         try:
-            target = _find_target(hwnd)
+            target = _find_target(hwnd, placement)
         except Exception:  # noqa: BLE001
             target = None
         if stop_event.is_set():
             return False
+        if placement.claim_edge and target is not None and not target.claiming:
+            # The sibling stepped aside: stop ignoring it, the slot is ours.
+            with self._lock:
+                self._placement = replace(self._placement, claim_edge=False)
         with self._lock:
             if (
                 stop_event.is_set()
@@ -757,23 +1003,31 @@ def update_layered_bitmap(hwnd: int, image: Image.Image) -> None:
         _ = user32.ReleaseDC(None, screen_dc)
 
 
-def _find_target(own_hwnd: int) -> _Target | None:
+def _find_target(
+    own_hwnd: int, placement: StripPlacement | None = None
+) -> _Target | None:
     user32 = _user32()
-    taskbar = int(user32.FindWindowW("Shell_TrayWnd", None) or 0)
-    if not taskbar:
+    placement = StripPlacement() if placement is None else placement
+    choice = choose_host(
+        taskbar_hosts(), host=placement.host, monitor=placement.monitor
+    )
+    if choice.candidate is None:
         return None
-    bounds = _window_rect(taskbar)
-    if bounds is None:
-        return None
+    taskbar = choice.candidate.handle
+    bounds = choice.candidate.bounds
+    # Secondary taskbars carry no tray at all: treat the right edge as the
+    # notification boundary so the sweep still has both ends measured.
     notification = _find_descendant_rect(taskbar, {"TrayNotifyWnd", "ClockButton"})
     if notification is None:
-        return None
+        notification = Rect(bounds.right, bounds.top, bounds.right, bounds.bottom)
     occupied_regions = _taskbar_occupied_regions(taskbar, bounds)
     task_buttons = tuple(
         region for class_name, region in occupied_regions
         if class_name == "Taskbar.TaskListButtonAutomationPeer"
     )
-    if not task_buttons:
+    # The primary taskbar always has task buttons; a secondary one can legally
+    # be empty, so only demand the sanity check where it means something.
+    if not task_buttons and choice.candidate.primary:
         return None
     # The Claude usage strip prefers the same left-hand gap, and UIA reports it
     # as a pane rather than a button, so sweep the sibling surfaces directly.
@@ -783,19 +1037,32 @@ def _find_target(own_hwnd: int) -> _Target | None:
         region for region in regions if region.left < notification.left
     )
     dpi = max(96, int(user32.GetDpiForWindow(taskbar) or 96))
+    geometry = TaskbarGeometry(
+        bounds,
+        notification,
+        _union_rects(interactive_before_notification),
+        regions,
+        siblings,
+    )
     result = place_taskbar_widget(
-        TaskbarGeometry(
-            bounds,
-            notification,
-            _union_rects(interactive_before_notification),
-            regions,
-            siblings,
-        ),
-        dpi=dpi,
+        geometry, dpi=dpi, zone=placement.zone, claim_edge=placement.claim_edge
     )
     if result.rect is None:
         return None
-    return _Target(taskbar, bounds, result.rect, dpi)
+    claiming = False
+    if placement.claim_edge:
+        # Keep claiming until the sibling has actually moved: once both
+        # placements agree, the slot is ours without ignoring anyone.
+        settled = place_taskbar_widget(geometry, dpi=dpi, zone=placement.zone)
+        claiming = settled.rect != result.rect
+    return _Target(
+        taskbar,
+        bounds,
+        result.rect,
+        dpi,
+        host_fallback=choice.fallback,
+        claiming=claiming,
+    )
 
 
 def sibling_surface_rects(taskbar: int, own_hwnd: int) -> tuple[Rect, ...]:
@@ -1114,3 +1381,27 @@ def _configure_user32(library: ctypes.WinDLL) -> None:  # noqa: PLR0915
     library.GetDpiForWindow.restype = wintypes.UINT
     library.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
     library.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+    library.FindWindowExW.argtypes = [
+        wintypes.HWND,
+        wintypes.HWND,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+    ]
+    library.FindWindowExW.restype = wintypes.HWND
+    library.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+    library.MonitorFromWindow.restype = wintypes.HANDLE
+    library.GetMonitorInfoW.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(_MONITORINFOEXW),
+    ]
+    library.GetMonitorInfoW.restype = wintypes.BOOL
+    library.WindowFromPoint.argtypes = [wintypes.POINT]
+    library.WindowFromPoint.restype = wintypes.HWND
+    library.GetAncestor.argtypes = [wintypes.HWND, wintypes.UINT]
+    library.GetAncestor.restype = wintypes.HWND
+    library.SetCapture.argtypes = [wintypes.HWND]
+    library.SetCapture.restype = wintypes.HWND
+    library.ReleaseCapture.argtypes = []
+    library.ReleaseCapture.restype = wintypes.BOOL
+    library.GetSystemMetrics.argtypes = [ctypes.c_int]
+    library.GetSystemMetrics.restype = ctypes.c_int

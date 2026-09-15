@@ -38,6 +38,26 @@ class ThemeName(StrEnum):
     DARK = "dark"
 
 
+# SHARED STRIP CONTRACT -- keep identical in the Claude widget (widget.pyw).
+# Where the taskbar strip lives: which taskbar window hosts it, and which end
+# of that taskbar it groups with.
+class TaskbarZone(StrEnum):
+    """Which end of the host taskbar the strip groups with."""
+
+    LEFT = "left"
+    RIGHT = "right"
+
+
+class TaskbarHost(StrEnum):
+    """Which taskbar window hosts the strip."""
+
+    PRIMARY = "primary"
+    SECONDARY = "secondary"
+
+
+_MAX_DEVICE_NAME: Final = 64
+
+
 @dataclass(frozen=True, slots=True)
 class WidgetConfig:
     """Validated persisted settings used by the Tk application."""
@@ -54,6 +74,11 @@ class WidgetConfig:
     pet: str | None = None
     refresh_seconds: int = 180
     position: WindowPosition | None = _DEFAULT_POSITION
+    taskbar_zone: TaskbarZone = TaskbarZone.LEFT
+    taskbar_host: TaskbarHost = TaskbarHost.PRIMARY
+    # ``GetMonitorInfoW`` szDevice of the secondary taskbar's monitor, as in
+    # the ``DISPLAY2`` device path. Empty for the primary taskbar.
+    taskbar_host_monitor: str = ""
 
     def __post_init__(self) -> None:
         """Reject invalid direct construction before settings reach the UI."""
@@ -82,6 +107,13 @@ class WidgetConfig:
                 <= _MAX_REFRESH_SECONDS,
             ),
             ("position", _valid_position(self.position)),
+            ("taskbar_zone", type(self.taskbar_zone) is TaskbarZone),
+            ("taskbar_host", type(self.taskbar_host) is TaskbarHost),
+            (
+                "taskbar_host_monitor",
+                type(self.taskbar_host_monitor) is str
+                and len(self.taskbar_host_monitor) <= _MAX_DEVICE_NAME,
+            ),
         )
         invalid = next((field for field, valid in checks if not valid), None)
         if invalid is not None:
@@ -126,6 +158,9 @@ class _ConfigData(TypedDict):
     pet: str | None
     refresh_seconds: int
     position: _PositionData | None
+    taskbar_zone: str
+    taskbar_host: str
+    taskbar_host_monitor: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +295,41 @@ def _parse_config(values: Mapping[str, ConfigJson]) -> WidgetConfig:
             _MAX_REFRESH_SECONDS,
         ),
         position=_position(values.get("position"), defaults.position),
+        taskbar_zone=_zone(values.get("taskbar_zone"), defaults.taskbar_zone),
+        taskbar_host=_host(values.get("taskbar_host"), defaults.taskbar_host),
+        taskbar_host_monitor=_device_name(
+            values.get("taskbar_host_monitor"),
+            defaults.taskbar_host_monitor,
+        ),
     )
+
+
+def _zone(value: ConfigJson, default: TaskbarZone) -> TaskbarZone:
+    match value:
+        case "left":
+            return TaskbarZone.LEFT
+        case "right":
+            return TaskbarZone.RIGHT
+        case _:
+            return default
+
+
+def _host(value: ConfigJson, default: TaskbarHost) -> TaskbarHost:
+    match value:
+        case "primary":
+            return TaskbarHost.PRIMARY
+        case "secondary":
+            return TaskbarHost.SECONDARY
+        case _:
+            return default
+
+
+def _device_name(value: ConfigJson, default: str) -> str:
+    match value:
+        case str() as name if len(name) <= _MAX_DEVICE_NAME:
+            return name
+        case _:
+            return default
 
 
 def _theme(value: ConfigJson, default: ThemeName) -> ThemeName:
@@ -342,4 +411,7 @@ def _to_data(config: WidgetConfig) -> _ConfigData:
         "pet": config.pet,
         "refresh_seconds": config.refresh_seconds,
         "position": position_data,
+        "taskbar_zone": config.taskbar_zone.value,
+        "taskbar_host": config.taskbar_host.value,
+        "taskbar_host_monitor": config.taskbar_host_monitor,
     }

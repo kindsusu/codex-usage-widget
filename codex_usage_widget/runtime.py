@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final, Literal, TypeAlias, final
 from codex_usage_widget import actions, menus, updater, windows
 from codex_usage_widget import config as widget_config
 from codex_usage_widget.assets import PET_NAMES
+from codex_usage_widget.config import TaskbarHost, TaskbarZone
 from codex_usage_widget.fetcher import fetch_snapshot
 from codex_usage_widget.opacity_popup import (
     OpacityPopupCallbacks,
@@ -22,9 +23,10 @@ from codex_usage_widget.position_store import persist_window_position
 from codex_usage_widget.presentation import present_snapshot
 from codex_usage_widget.service import RefreshService
 from codex_usage_widget.startup import report_startup_problem
-from codex_usage_widget.taskbar import TaskbarController
+from codex_usage_widget.taskbar import StripPlacement, TaskbarController
 from codex_usage_widget.taskbar_details import TaskbarDetailsPopup, monitor_metrics
 from codex_usage_widget.taskbar_model import build_taskbar_model
+from codex_usage_widget.taskbar_native import taskbar_hosts
 from codex_usage_widget.theme import theme_tokens
 from codex_usage_widget.topmost import SmartTopmostController
 from codex_usage_widget.tray import TrayCallbacks, TrayController
@@ -44,6 +46,7 @@ from codex_usage_widget.window_visibility import apply_native_window_state
 
 if TYPE_CHECKING:
     from codex_usage_widget.config import WidgetConfig
+    from codex_usage_widget.taskbar_placement import DropDecision
 
 _INSTALL_ROOT: Final = Path(__file__).resolve().parent.parent
 _CONFIG_PATH: Final = _INSTALL_ROOT / "widget_config.json"
@@ -61,9 +64,27 @@ SignalCommand: TypeAlias = Literal[
     "desktop_hidden",
     "mini",
     "taskbar",
+    "taskbar_drop",
     "refresh",
 ]
 Signal: TypeAlias = tuple[SignalCommand, int, int]
+
+
+def _strip_placement(
+    config: WidgetConfig, *, claim_edge: bool = False
+) -> StripPlacement:
+    """Translate saved settings into the native worker's placement request."""
+    return StripPlacement(
+        zone=config.taskbar_zone,
+        host=config.taskbar_host,
+        monitor=config.taskbar_host_monitor,
+        claim_edge=claim_edge,
+    )
+
+
+def _secondary_taskbar_exists() -> bool:
+    """Whether Windows currently shows a taskbar on another monitor."""
+    return any(not host.primary for host in taskbar_hosts())
 
 
 @final
@@ -124,7 +145,10 @@ class WidgetApplication:
             lambda x, y: self._signals.put(("details", x, y)),
             lambda x, y: self._signals.put(("visibility_panel", x, y)),
             self._queue_taskbar_menu,
+            self._queue_taskbar_drop,
         )
+        self._taskbar.set_placement(_strip_placement(self._config))
+        self._drops: Queue[DropDecision] = Queue()
         self._visibility_panel = VisibilityPanel(
             root,
             VisibilityCallbacks(
@@ -269,6 +293,8 @@ class WidgetApplication:
                 self._toggle_mini()
             case "taskbar":
                 self._toggle_taskbar_visibility()
+            case "taskbar_drop":
+                self._apply_taskbar_drop()
             case "refresh":
                 self.refresh()
         return False
@@ -305,6 +331,10 @@ class WidgetApplication:
                 ),
                 None: None,
             }[effective.fallback]
+            if fallback_status is None and self._taskbar.host_fallback:
+                # The chosen taskbar is gone (monitor unplugged); we borrow the
+                # primary one and keep the saved setting for its return.
+                fallback_status = "선택한 작업표시줄 없음 · 주 작업표시줄 사용 중"
             self._tray.set_status(fallback_status)
             if effective.desktop:
                 self._root.deiconify()
@@ -318,7 +348,9 @@ class WidgetApplication:
             return
         if self._config.taskbar_visible and not self._taskbar.available:
             _ = self._taskbar.start()
-        self._apply_visibility()
+        # force=True so a host that appeared or vanished refreshes the status
+        # even when the effective visibility itself has not changed.
+        self._apply_visibility(force=True)
         _ = self._root.after(_TASKBAR_RETRY_MS, self._retry_taskbar)
 
     def _schedule_update_check(self, delay_ms: int) -> None:
@@ -435,6 +467,49 @@ class WidgetApplication:
     def _toggle_desktop_visibility(self) -> None:
         self._save_and_render(actions.toggle_desktop_visibility(self._config))
 
+    def _set_taskbar_placement(
+        self,
+        zone: TaskbarZone,
+        host: TaskbarHost,
+        monitor: str | None = None,
+    ) -> None:
+        """Persist a new strip destination and re-embed straight away."""
+        resolved = monitor
+        if resolved is None:
+            resolved = (
+                self._config.taskbar_host_monitor
+                if host is TaskbarHost.SECONDARY
+                else ""
+            )
+        config = actions.set_taskbar_placement(
+            self._config, zone=zone, host=host, monitor=resolved
+        )
+        self._save_and_render(config)
+        self._taskbar.set_placement(_strip_placement(config))
+
+    def _queue_taskbar_drop(self, decision: DropDecision) -> None:
+        """Hand a native drag result to the Tk thread."""
+        self._drops.put(decision)
+        self._signals.put(("taskbar_drop", 0, 0))
+
+    def _apply_taskbar_drop(self) -> None:
+        """Save where the user dropped the strip, then claim the slot."""
+        try:
+            decision = self._drops.get_nowait()
+        except Empty:
+            return
+        host = (
+            TaskbarHost.PRIMARY if decision.host.primary else TaskbarHost.SECONDARY
+        )
+        monitor = "" if decision.host.primary else decision.host.monitor
+        config = actions.set_taskbar_placement(
+            self._config, zone=decision.zone, host=host, monitor=monitor
+        )
+        self._save_and_render(config)
+        self._taskbar.set_placement(
+            _strip_placement(config, claim_edge=decision.claim_edge)
+        )
+
     def _toggle_taskbar_visibility(self) -> None:
         self._save_and_render(actions.toggle_taskbar_visibility(self._config))
 
@@ -465,6 +540,8 @@ class WidgetApplication:
             lambda: self._set_desktop_mode(actions.DesktopMode.MINI),
             lambda: self._set_desktop_mode(actions.DesktopMode.HIDDEN),
             self._toggle_taskbar_visibility,
+            self._set_taskbar_placement,
+            _secondary_taskbar_exists,
             self._toggle_topmost,
             self._toggle_auto_update,
             self.shutdown,
