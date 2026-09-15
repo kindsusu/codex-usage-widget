@@ -6,9 +6,9 @@ from codex_usage_widget.taskbar_placement import (
 )
 
 
-def test_prefers_the_free_run_at_the_reserved_leading_edge() -> None:
-    # 2026-09-14: both usage strips belong at the left of the taskbar, so the
-    # leftmost free run wins and is taken flush with the 200px reserve.
+def test_prefers_the_free_run_at_the_leading_edge_margin() -> None:
+    # 2026-09-15: the flat 200px Widgets reserve is gone; the sweep starts at
+    # an 8px edge margin and only real obstacles push it right.
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
@@ -18,25 +18,42 @@ def test_prefers_the_free_run_at_the_reserved_leading_edge() -> None:
     result = place_taskbar_widget(geometry, dpi=96)
 
     assert result.failure is None
-    assert result.rect == Rect(200, 1001, 361, 1047)     # shared 161px width
+    assert result.rect == Rect(8, 1001, 169, 1047)       # shared 161px width
     assert result.rect is not None
     assert geometry.occupied is not None
     assert result.rect.right < geometry.occupied.left
 
 
-def test_sits_flush_against_a_sibling_strip_on_the_left() -> None:
-    sibling = Rect(200, 1000, 361, 1048)
+def test_leading_edge_obstacle_pushes_the_sweep_past_it() -> None:
+    # A Widgets surface (or anything else) that really sits at the left edge
+    # is an obstacle, which is what replaced the blind 200px reserve.
+    widgets = Rect(0, 1000, 120, 1048)
     geometry = TaskbarGeometry(
         Rect(0, 1000, 1920, 1048),
         Rect(1740, 1000, 1920, 1048),
-        Rect(200, 1000, 1450, 1048),
+        Rect(0, 1000, 1450, 1048),
+        (widgets, Rect(900, 1000, 1450, 1048)),
+    )
+
+    result = place_taskbar_widget(geometry, dpi=96)
+
+    assert result.rect is not None
+    assert result.rect.left >= widgets.right
+
+
+def test_sits_flush_against_a_sibling_strip_on_the_left() -> None:
+    sibling = Rect(8, 1000, 169, 1048)
+    geometry = TaskbarGeometry(
+        Rect(0, 1000, 1920, 1048),
+        Rect(1740, 1000, 1920, 1048),
+        Rect(8, 1000, 1450, 1048),
         (sibling, Rect(900, 1000, 1450, 1048)),
         (sibling,),
     )
 
     result = place_taskbar_widget(geometry, dpi=96)
 
-    assert result.rect == Rect(365, 1001, 526, 1047)     # sibling.right + 4px gap
+    assert result.rect == Rect(173, 1001, 334, 1047)     # sibling.right + 4px gap
 
 
 def test_narrow_space_fails_instead_of_overlaying() -> None:
@@ -88,7 +105,7 @@ def test_uses_verified_gap_before_start_when_right_side_is_full() -> None:
 
     result = place_taskbar_widget(geometry, dpi=144)
 
-    assert result.rect == Rect(300, 1529, 542, 1598)   # 242 = 161 @ 144dpi
+    assert result.rect == Rect(12, 1529, 254, 1598)    # 242 = 161 @ 144dpi
 
 
 def test_sibling_usage_strip_is_not_covered() -> None:
@@ -104,7 +121,7 @@ def test_sibling_usage_strip_is_not_covered() -> None:
 
     assert result.rect is not None
     assert result.rect.right <= sibling.left
-    assert result.rect.left >= 200
+    assert result.rect.left >= 8
 
 
 def test_negative_monitor_coordinates_do_not_confuse_gap_with_failure() -> None:
@@ -117,4 +134,4 @@ def test_negative_monitor_coordinates_do_not_confuse_gap_with_failure() -> None:
 
     result = place_taskbar_widget(geometry, dpi=96)
 
-    assert result.rect == Rect(-1720, 1001, -1559, 1047)
+    assert result.rect == Rect(-1912, 1001, -1751, 1047)

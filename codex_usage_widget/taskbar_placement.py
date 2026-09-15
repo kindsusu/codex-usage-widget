@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Final
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +53,16 @@ class PlacementResult:
     failure: PlacementFailure | None = None
 
 
+# Left sweep start. Until 2026-09-15 this was a flat 200px "Windows reserves
+# the leading edge for Widgets" rule, which threw away the whole left end of a
+# taskbar that has no Widgets button. Now only a hairline margin is skipped and
+# anything that really sits there arrives in `occupied_regions` (the native
+# scan treats every element starting inside the leading band as an obstacle,
+# whatever its UIA control type). Mirrored in the Claude widget.
+EDGE_MARGIN: Final = 8
+LEADING_BAND: Final = 200
+
+
 def logical_pixels(value: int, dpi: int) -> int:
     """Scale logical pixels using the target taskbar DPI."""
     return max(1, (value * max(96, dpi) + 48) // 96)
@@ -72,7 +83,7 @@ def place_taskbar_widget(  # noqa: PLR0913
 
     The user wants both usage strips packed at the left of the taskbar
     (2026-09-14), so the free runs are swept left to right and the first one
-    that fits wins. A run that begins at the reserved leading edge or at a
+    that fits wins. A run that begins at the leading edge margin or at a
     sibling strip is taken flush with that anchor, which is what puts the two
     strips side by side; any other run still hugs the obstacle on its right.
     """
@@ -85,9 +96,9 @@ def place_taskbar_widget(  # noqa: PLR0913
     minimum = logical_pixels(minimum_width, dpi)
     preferred = logical_pixels(preferred_width, dpi)
     scaled_gap = logical_pixels(gap, dpi)
-    # Windows reserves the leading edge for Widgets even when UIA does not
-    # expose a button. Search only gaps after that conservative boundary.
-    leading_reserve = taskbar.left + logical_pixels(200, dpi)
+    # Start at the very edge: whatever actually sits there (a Widgets
+    # surface, a left-aligned Start cluster) arrives in occupied_regions.
+    leading_reserve = taskbar.left + logical_pixels(EDGE_MARGIN, dpi)
     source_regions = geometry.occupied_regions
     if not source_regions and geometry.occupied is not None:
         source_regions = (geometry.occupied,)

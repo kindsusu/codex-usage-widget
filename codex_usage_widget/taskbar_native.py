@@ -25,8 +25,10 @@ if TYPE_CHECKING:
 
 from codex_usage_widget.taskbar_model import TaskbarModel
 from codex_usage_widget.taskbar_placement import (
+    LEADING_BAND,
     Rect,
     TaskbarGeometry,
+    logical_pixels,
     place_taskbar_widget,
 )
 
@@ -844,6 +846,9 @@ def _taskbar_occupied_regions(
         )
         root = automation.ElementFromHandle(taskbar)
         elements = root.FindAll(4, automation.CreateTrueCondition())
+        dpi = max(96, int(_user32().GetDpiForWindow(taskbar) or 96))
+        band = taskbar_bounds.left + logical_pixels(LEADING_BAND, dpi)
+        half = taskbar_bounds.width // 2
         found: list[tuple[str, Rect]] = []
         for index in range(elements.Length):
             element = elements.GetElement(index)
@@ -854,13 +859,20 @@ def _taskbar_occupied_regions(
                 round(native.right),
                 round(native.bottom),
             )
+            class_name = str(element.CurrentClassName)
             if (
-                element.CurrentControlType == _UIA_BUTTON_CONTROL_TYPE
-                and rect.width > 0
-                and rect.height > 0
-                and _intersects(rect, taskbar_bounds)
+                rect.width <= 0
+                or rect.height <= 0
+                or not _intersects(rect, taskbar_bounds)
+                or class_name.startswith(SIBLING_CLASS_PREFIXES)
             ):
-                found.append((str(element.CurrentClassName), rect))
+                continue
+            # Near the left edge trust position over control type: a Widgets
+            # surface is not always exposed as a button, and covering it would
+            # be worse than losing a strip. Full-bar containers are skipped.
+            leading = rect.left < band and rect.width < half
+            if element.CurrentControlType == _UIA_BUTTON_CONTROL_TYPE or leading:
+                found.append((class_name, rect))
         if not found:
             return ()
         return tuple(found)
