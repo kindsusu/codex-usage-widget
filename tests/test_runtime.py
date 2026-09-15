@@ -10,8 +10,19 @@ from typing import TYPE_CHECKING, cast, final
 import pytest
 
 import codex_usage_widget.runtime as runtime
-from codex_usage_widget.config import WidgetConfig, load_config
+from codex_usage_widget.taskbar_native import StripPlacement
+from codex_usage_widget.config import (
+    TaskbarHost,
+    TaskbarZone,
+    WidgetConfig,
+    load_config,
+)
 from codex_usage_widget.position_store import persist_window_position
+from codex_usage_widget.taskbar_placement import (
+    DropDecision,
+    Rect,
+    TaskbarHostCandidate,
+)
 from codex_usage_widget.windows import WindowPosition
 from codex_usage_widget.windows import SingleInstanceStatus
 
@@ -80,6 +91,15 @@ class _PollTaskbar:
 
     def suppress_held_menu_release(self) -> bool:
         return False
+
+
+@final
+class _PlacementTaskbar:
+    def __init__(self) -> None:
+        self.placements: list[StripPlacement] = []
+
+    def set_placement(self, placement: StripPlacement) -> None:
+        self.placements.append(placement)
 
 
 @final
@@ -181,6 +201,71 @@ def test_drag_end_persists_position_without_rebuilding_the_surface(
 
     # Then: the returned and stored configurations match the new position.
     assert load_config(config_path) == updated == expected
+
+
+@pytest.mark.parametrize(
+    ("decision", "initial_priority", "expected_priority", "expected_yield"),
+    [
+        (
+            DropDecision(
+                TaskbarHostCandidate(
+                    1, Rect(0, 1000, 1920, 1048), "", primary=True
+                ),
+                TaskbarZone.LEFT,
+                claim_edge=True,
+                edge_priority=True,
+            ),
+            False,
+            True,
+            False,
+        ),
+        (
+            DropDecision(
+                TaskbarHostCandidate(
+                    1, Rect(0, 1000, 1920, 1048), "", primary=True
+                ),
+                TaskbarZone.LEFT,
+                edge_priority=False,
+                yield_edge=True,
+            ),
+            True,
+            False,
+            True,
+        ),
+    ],
+)
+def test_taskbar_drop_persists_both_directions_of_a_slot_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    decision: DropDecision,
+    initial_priority: bool,
+    expected_priority: bool,
+    expected_yield: bool,
+) -> None:
+    application = runtime.WidgetApplication.__new__(runtime.WidgetApplication)
+    drops: Queue[DropDecision] = Queue()
+    drops.put(decision)
+    taskbar = _PlacementTaskbar()
+    config = WidgetConfig(taskbar_edge_priority=initial_priority)
+    monkeypatch.setattr(application, "_drops", drops, raising=False)
+    monkeypatch.setattr(application, "_config", config, raising=False)
+    monkeypatch.setattr(application, "_taskbar", taskbar, raising=False)
+    def save_and_render(updated: WidgetConfig) -> None:
+        application._config = updated
+
+    monkeypatch.setattr(application, "_save_and_render", save_and_render)
+
+    application._apply_taskbar_drop()
+
+    assert application._config.taskbar_edge_priority is expected_priority
+    assert taskbar.placements == [
+        StripPlacement(
+            zone=TaskbarZone.LEFT,
+            host=TaskbarHost.PRIMARY,
+            edge_priority=expected_priority,
+            claim_edge=decision.claim_edge,
+            yield_edge=expected_yield,
+        )
+    ]
 
 
 def test_tray_show_reapplies_taskbar_style_and_window_layer(

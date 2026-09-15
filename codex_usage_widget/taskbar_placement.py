@@ -287,6 +287,8 @@ class DropDecision:
     host: TaskbarHostCandidate
     zone: TaskbarZone
     claim_edge: bool = False
+    edge_priority: bool | None = None
+    yield_edge: bool = False
 
 
 def decide_drop(
@@ -294,6 +296,8 @@ def decide_drop(
     candidates: tuple[TaskbarHostCandidate, ...],
     *,
     siblings: tuple[Rect, ...] = (),
+    source: Rect | None = None,
+    final_rect: Rect | None = None,
 ) -> DropDecision | None:
     """Read a released drag: which taskbar, which end, whose slot.
 
@@ -301,6 +305,9 @@ def decide_drop(
     caller treats as "keep the previous placement".
     """
     x, y = point
+    if final_rect is not None:
+        x = (final_rect.left + final_rect.right) // 2
+        y = (final_rect.top + final_rect.bottom) // 2
     host = next(
         (
             item
@@ -318,24 +325,68 @@ def decide_drop(
         sibling
         for sibling in siblings
         if sibling.left < host.bounds.right and sibling.right > host.bounds.left
+        and sibling.top < host.bounds.bottom
+        and sibling.bottom > host.bounds.top
     )
-    # Dropped on the sibling's edge-facing half (or past it): the user aimed at
-    # that slot, so take it. Dropped on its inner half: sit beside it instead.
+    # The sibling's whole surface is a swap target.  Requiring the pointer to
+    # cross its midpoint made half of the visible strip a misleading dead zone.
+    # Points farther toward the outer edge keep the existing edge-claim gesture.
     if zone is TaskbarZone.LEFT:
         same_zone = tuple(
             item for item in inside if (item.left + item.right) // 2 < middle
         )
-        claim = bool(same_zone) and x < min(
-            (item.left + item.right) // 2 for item in same_zone
-        )
+        claim = bool(same_zone) and x < min(item.right for item in same_zone)
     else:
         same_zone = tuple(
             item for item in inside if (item.left + item.right) // 2 >= middle
         )
-        claim = bool(same_zone) and x > max(
-            (item.left + item.right) // 2 for item in same_zone
+        claim = bool(same_zone) and x >= max(item.left for item in same_zone)
+    if same_zone and source is not None and final_rect is not None:
+        source_on_host = (
+            source.left < host.bounds.right
+            and source.right > host.bounds.left
+            and source.top < host.bounds.bottom
+            and source.bottom > host.bounds.top
         )
-    return DropDecision(host, zone, claim)
+        if not source_on_host:
+            return DropDecision(
+                host, zone, claim, edge_priority=True if claim else None
+            )
+        source_middle = (source.left + source.right) // 2
+        final_middle = (final_rect.left + final_rect.right) // 2
+        target = min(
+            same_zone,
+            key=lambda item: abs((item.left + item.right) // 2 - source_middle),
+        )
+        target_middle = (target.left + target.right) // 2
+        source_at_edge = (
+            source_middle < target_middle
+            if zone is TaskbarZone.LEFT
+            else source_middle > target_middle
+        )
+        final_at_edge = (
+            final_middle < target_middle
+            if zone is TaskbarZone.LEFT
+            else final_middle > target_middle
+        )
+        overlaps_target = (
+            final_rect.left < target.right
+            and final_rect.right > target.left
+            and final_rect.top < target.bottom
+            and final_rect.bottom > target.top
+        )
+        if overlaps_target:
+            # Preserve the established direct-overlap swap gesture. In
+            # particular, equal centers have no geometric "side" of their own.
+            final_at_edge = not source_at_edge
+        if source_at_edge == final_at_edge:
+            return DropDecision(host, zone)
+        if source_at_edge:
+            return DropDecision(
+                host, zone, claim_edge=False, edge_priority=False, yield_edge=True
+            )
+        return DropDecision(host, zone, claim_edge=True, edge_priority=True)
+    return DropDecision(host, zone, claim, edge_priority=True if claim else None)
 
 
 def clamp_to_host(rect: Rect, host: Rect) -> Rect:
@@ -473,6 +524,16 @@ def ghost_origin(
         origin.left + cursor[0] - press[0],
         origin.top + cursor[1] - press[1],
     )
+
+
+def ghost_rect(
+    cursor: tuple[int, int],
+    press: tuple[int, int],
+    origin: Rect,
+) -> Rect:
+    """Final ghost bounds, preserving where inside the strip it was grabbed."""
+    left, top = ghost_origin(cursor, press, origin)
+    return Rect(left, top, left + origin.width, top + origin.height)
 
 
 def drag_state(

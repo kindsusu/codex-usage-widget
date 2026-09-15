@@ -46,6 +46,7 @@ from codex_usage_widget.taskbar_placement import (
     edge_anchor,
     evicted_from_edge,
     ghost_origin,
+    ghost_rect,
     logical_pixels,
     place_taskbar_widget,
     second_slot_left,
@@ -65,10 +66,15 @@ WM_CAPTURECHANGED: Final = 0x0215
 WM_TIMER: Final = 0x0113
 _DRAG_TIMER_ID: Final = 1
 _DRAG_TIMER_MS: Final = 50
+_SWAP_TIMER_ID: Final = 2
+_SWAP_TIMER_MS: Final = 50
+_SWAP_TIMEOUT_SECONDS: Final = 2.0
 WM_APP_UPDATE: Final = 0x8001
 WM_APP_VISIBILITY: Final = 0x8002
 WM_APP_STOP: Final = 0x8003
 WM_APP_LAYOUT: Final = 0x8004
+WM_APP_SWAP_READY: Final = 0x8005
+WM_APP_SIBLING_ORDER: Final = 0x8006
 WS_CHILD: Final = 0x40000000
 WS_POPUP: Final = 0x80000000
 WS_CLIPSIBLINGS: Final = 0x04000000
@@ -272,6 +278,9 @@ class StripPlacement:
     claim_edge: bool = False
     # SHARED STRIP CONTRACT: True means this strip owns the edge slot.
     edge_priority: bool = True
+    # A hand-requested edge-to-inner swap temporarily occupies the second slot
+    # until the sibling has moved into the vacated edge slot.
+    yield_edge: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +380,7 @@ class NativeTaskbarHost:
         self._lock = Lock()
         self._ready = Event()
         self._stop_requested = Event()
+        self._rescan_requested = Event()
         self._generation = 0
         self._thread: Thread | None = None
         self._observer: Thread | None = None
@@ -397,6 +407,14 @@ class NativeTaskbarHost:
         self._press: tuple[int, int] | None = None
         self._press_rect: Rect | None = None
         self._dragging = False
+        self._swap_pending = False
+        self._swap_deadline = 0.0
+        self._swap_source: Rect | None = None
+        self._swap_target: Rect | None = None
+        self._swap_parent = 0
+        self._swap_bounds: Rect | None = None
+        self._swap_sibling_ready = False
+        self._swap_original_priority = True
 
     @property
     def available(self) -> bool:
@@ -429,6 +447,7 @@ class NativeTaskbarHost:
             if placement == self._placement:
                 return
             self._placement = placement
+            self._rescan_requested.set()
             if placement.claim_edge:
                 # A hand-placed claim outranks the sibling's automatic one.
                 self._explicit_until = monotonic() + EDGE_EXPLICIT_SECONDS
@@ -516,6 +535,7 @@ class NativeTaskbarHost:
             thread = self._thread
             hwnd = self._hwnd
             self._stop_requested.set()
+            self._rescan_requested.set()
         if hwnd:
             _user32().PostMessageW(hwnd, WM_APP_STOP, 0, 0)
         if thread is not None and thread.ident != get_ident():
@@ -614,7 +634,7 @@ class NativeTaskbarHost:
                     self._hwnd = 0
                     self._ready.set()
 
-    def _window_proc(  # noqa: C901, PLR0911, PLR0912
+    def _window_proc(  # noqa: C901, PLR0911, PLR0912, PLR0915
         self, hwnd: int, message: int, wparam: int, lparam: int
     ) -> int:
         user32 = _user32()
@@ -639,6 +659,12 @@ class NativeTaskbarHost:
             # stands still.
             if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8001:
                 self._cancel_drag(hwnd)
+            return 0
+        if message == WM_TIMER and wparam == _SWAP_TIMER_ID:
+            if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8001:
+                self._abort_swap_transition(hwnd)
+            else:
+                self._settle_swap_transition(hwnd)
             return 0
         if message == WM_CAPTURECHANGED:
             # Someone took the capture away: treat it as a cancelled drag.
@@ -682,6 +708,12 @@ class NativeTaskbarHost:
             return 0
         if message == WM_APP_LAYOUT:
             self._apply_observed_target()
+            return 0
+        if message == WM_APP_SWAP_READY:
+            self._complete_swap_transition(hwnd)
+            return 0
+        if message == WM_APP_SIBLING_ORDER:
+            self._accept_sibling_order(bool(wparam))
             return 0
         if message == WM_APP_STOP:
             user32.DestroyWindow(hwnd)
@@ -761,11 +793,190 @@ class NativeTaskbarHost:
         if hwnd:
             self._render_layered(hwnd)
 
+    def _begin_swap_transition(
+        self,
+        hwnd: int,
+        decision: DropDecision,
+        source: Rect,
+        siblings: tuple[Rect, ...],
+    ) -> bool:
+        """Move invisibly into the sibling slot while the sibling takes edge."""
+        bounds = decision.host.bounds
+        middle = (bounds.left + bounds.right) // 2
+        candidates = tuple(
+            item
+            for item in siblings
+            if item.left < bounds.right
+            and item.right > bounds.left
+            and item.top < bounds.bottom
+            and item.bottom > bounds.top
+            and (
+                ((item.left + item.right) // 2 < middle)
+                == (decision.zone is TaskbarZone.LEFT)
+            )
+        )
+        if not candidates:
+            return False
+        source_middle = (source.left + source.right) // 2
+        sibling = min(
+            candidates,
+            key=lambda item: abs((item.left + item.right) // 2 - source_middle),
+        )
+        target = Rect(
+            sibling.left,
+            sibling.top,
+            sibling.left + source.width,
+            sibling.top + source.height,
+        )
+        with self._lock:
+            self._swap_pending = True
+            self._swap_deadline = monotonic() + _SWAP_TIMEOUT_SECONDS
+            self._swap_source = source
+            self._swap_target = target
+            self._swap_parent = decision.host.handle
+            self._swap_bounds = bounds
+            self._swap_sibling_ready = False
+            self._swap_original_priority = not bool(decision.edge_priority)
+            ghost, self._ghost = self._ghost, 0
+        # Central rendering sees swap_pending and publishes alpha 0 before the
+        # HWND is moved into the sibling's still-occupied slot.
+        self._render_layered(hwnd)
+        destroy_ghost_window(ghost)
+        try:
+            api = _Win32AttachmentApi()
+            attached = True
+            if api.get_parent(hwnd) == decision.host.handle:
+                api.position(hwnd, decision.host.handle, target, bounds)
+            else:
+                attached = attach_transaction(
+                    api, hwnd, decision.host.handle, target, bounds
+                )
+        except OSError:
+            self._abort_swap_transition(hwnd)
+            return False
+        if not attached:
+            self._abort_swap_transition(hwnd)
+            return False
+        user32 = _user32()
+        _ = user32.KillTimer(hwnd, _DRAG_TIMER_ID)
+        _ = user32.SetTimer(hwnd, _SWAP_TIMER_ID, _SWAP_TIMER_MS, None)
+        notify_sibling_order(
+            decision.host.handle, hwnd, priority=not bool(decision.edge_priority)
+        )
+        return True
+
+    def _settle_swap_transition(self, hwnd: int) -> None:
+        """Reveal only after the sibling vacates our invisible final slot."""
+        with self._lock:
+            pending = self._swap_pending
+            deadline = self._swap_deadline
+            source = self._swap_source
+            target = self._swap_target
+            parent = self._swap_parent
+        if not pending or source is None or target is None or not parent:
+            return
+        siblings = sibling_surface_rects(parent, hwnd)
+        sibling_at_source = any(_intersects(item, source) for item in siblings)
+        target_clear = not any(_intersects(item, target) for item in siblings)
+        if sibling_at_source and target_clear:
+            with self._lock:
+                self._swap_sibling_ready = True
+            self._rescan_requested.set()
+        elif monotonic() >= deadline:
+            self._abort_swap_transition(hwnd)
+
+    def _clear_swap_transition(self, hwnd: int) -> int:
+        """Clear transition state and return the ghost that must be destroyed."""
+        if hwnd:
+            _ = _user32().KillTimer(hwnd, _SWAP_TIMER_ID)
+        with self._lock:
+            ghost, self._ghost = self._ghost, 0
+            self._swap_pending = False
+            self._swap_deadline = 0.0
+            self._swap_source = None
+            self._swap_target = None
+            self._swap_parent = 0
+            self._swap_bounds = None
+            self._swap_sibling_ready = False
+        return ghost
+
+    def _complete_swap_transition(self, hwnd: int) -> None:
+        with self._lock:
+            target = self._observed_target
+            expected = self._swap_target
+            parent = self._swap_parent
+        if (
+            target is None
+            or expected is None
+            or target.parent != parent
+            or target.placement.left != expected.left
+            or target.placement.right != expected.right
+            or any(
+                _intersects(item, target.placement)
+                for item in sibling_surface_rects(parent, hwnd)
+            )
+        ):
+            return
+        try:
+            _Win32AttachmentApi().position(
+                hwnd, target.parent, target.placement, target.bounds
+            )
+        except OSError:
+            self._abort_swap_transition(hwnd)
+            return
+        ghost = self._clear_swap_transition(hwnd)
+        destroy_ghost_window(ghost)
+        self._render_layered(hwnd)
+
+    def _abort_swap_transition(self, hwnd: int) -> None:
+        with self._lock:
+            source = self._swap_source
+            parent = self._swap_parent
+            bounds = self._swap_bounds
+            placement = self._placement
+            original_priority = self._swap_original_priority
+        if source is not None and parent and bounds is not None:
+            with suppress(OSError):
+                _Win32AttachmentApi().position(hwnd, parent, source, bounds)
+        with self._lock:
+            self._placement = replace(
+                placement,
+                edge_priority=original_priority,
+                claim_edge=False,
+                yield_edge=False,
+            )
+        ghost = self._clear_swap_transition(hwnd)
+        destroy_ghost_window(ghost)
+        with suppress(Exception):
+            self._on_priority(original_priority)
+        if parent:
+            notify_sibling_order(
+                parent, hwnd, priority=not original_priority
+            )
+        self._render_layered(hwnd)
+
+    def _accept_sibling_order(self, priority: bool) -> None:
+        """Apply the other strip's explicit swap half and wake one fresh scan."""
+        with self._lock:
+            self._placement = replace(
+                self._placement,
+                edge_priority=priority,
+                claim_edge=priority,
+                yield_edge=False,
+            )
+            if priority:
+                self._explicit_until = monotonic() + EDGE_EXPLICIT_SECONDS
+        with suppress(Exception):
+            self._on_priority(priority)
+        self._rescan_requested.set()
+
     def _finish_drag(self, hwnd: int) -> bool:
         """Release a drag and report the drop. True when a drag was handled."""
         with self._lock:
             pressed = self._press is not None
             dragging = self._dragging
+            press = self._press
+            source = self._press_rect
             self._press = None
             self._press_rect = None
             self._dragging = False
@@ -773,21 +984,41 @@ class NativeTaskbarHost:
             return False                      # a synthetic release: nothing held
         user32 = _user32()
         _ = user32.ReleaseCapture()
-        self._end_ghost(hwnd)
         if not dragging:
+            self._end_ghost(hwnd)
             return False
         point = wintypes.POINT()
-        if user32.GetCursorPos(ctypes.byref(point)):
+        if (
+            user32.GetCursorPos(ctypes.byref(point))
+            and press is not None
+            and source is not None
+        ):
+            hosts = taskbar_hosts()
+            final_rect = ghost_rect((point.x, point.y), press, source)
+            siblings = tuple(
+                sibling
+                for host in hosts
+                for sibling in sibling_surface_rects(host.handle, hwnd)
+            )
             decision = decide_drop(
                 (point.x, point.y),
-                taskbar_hosts(),
-                siblings=sibling_surface_rects(
-                    int(user32.GetParent(hwnd) or 0), hwnd
-                ),
+                hosts,
+                siblings=siblings,
+                source=source,
+                final_rect=final_rect,
             )
             if decision is not None:
-                with suppress(Exception):
-                    self._on_move(decision)
+                source_on_host = _intersects(source, decision.host.bounds)
+                wants_swap = decision.edge_priority is not None and source_on_host
+                transition = wants_swap and self._begin_swap_transition(
+                    hwnd, decision, source, siblings
+                )
+                if not wants_swap or transition:
+                    with suppress(Exception):
+                        self._on_move(decision)
+                if transition:
+                    return True
+        self._end_ghost(hwnd)
         # Either way, snap back to a computed placement instead of the
         # free-hand position the pointer left behind.
         _ = user32.PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
@@ -865,7 +1096,9 @@ class NativeTaskbarHost:
         while not stop_event.is_set():
             if not self._observe_once(hwnd, stop_event, generation):
                 return
-            if stop_event.wait(_TIMER_MS / 1000):
+            if self._rescan_requested.wait(_TIMER_MS / 1000):
+                self._rescan_requested.clear()
+            if stop_event.is_set():
                 return
 
     def _observe_once(self, hwnd: int, stop_event: Event, generation: int) -> bool:
@@ -891,6 +1124,13 @@ class NativeTaskbarHost:
             # The sibling stepped aside: stop ignoring it, the slot is ours.
             with self._lock:
                 self._placement = replace(self._placement, claim_edge=False)
+        if placement.yield_edge and target is not None and target.sibling_at_edge:
+            # The sibling accepted the vacated edge; ordinary sweep now keeps
+            # us beside it without the temporary overlap.
+            with self._lock:
+                self._placement = replace(self._placement, yield_edge=False)
+        with self._lock:
+            swap_ready = self._swap_pending and self._swap_sibling_ready
         with self._lock:
             if (
                 stop_event.is_set()
@@ -900,6 +1140,10 @@ class NativeTaskbarHost:
             ):
                 return False
             self._observed_target = target
+        if swap_ready and target is not None and target.parent == self._swap_parent:
+            return bool(
+                _user32().PostMessageW(hwnd, WM_APP_SWAP_READY, 0, 0)
+            )
         return bool(_user32().PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0))
 
     def _settle_edge_priority(
@@ -954,6 +1198,9 @@ class NativeTaskbarHost:
         with self._lock:
             hwnd = self._hwnd
             target = self._observed_target
+            swap_pending = self._swap_pending
+        if swap_pending:
+            return
         if not hwnd or target is None:
             with self._lock:
                 self._attached = False
@@ -992,6 +1239,7 @@ class NativeTaskbarHost:
                 return
             with self._lock:
                 model = self._model
+                swap_pending = self._swap_pending
             dpi = max(96, int(_user32().GetDpiForWindow(hwnd) or 96))
             from codex_usage_widget.taskbar_render import (  # noqa: PLC0415
                 render_taskbar,
@@ -1006,7 +1254,7 @@ class NativeTaskbarHost:
                 light_theme=_system_uses_light_theme(),
                 high_contrast=_high_contrast(),
             )
-            update_layered_bitmap(hwnd, image, alpha)
+            update_layered_bitmap(hwnd, image, 0 if swap_pending else alpha)
             with self._lock:
                 self._last_image = image
         except Exception:  # noqa: BLE001
@@ -1291,6 +1539,14 @@ def _find_target(
         candidate_rect = Rect(reserved, rect.top, reserved + width, rect.bottom)
         if not any(_intersects(candidate_rect, region) for region in regions):
             rect = candidate_rect
+    if placement.yield_edge:
+        # Vacate the edge immediately so the sibling's next ordinary sweep can
+        # take it. The short overlap at the second slot ends once that happens.
+        reserved = second_slot_left(
+            bounds, notification, zone=placement.zone, gap=gap, margin=margin,
+            width=width,
+        )
+        rect = Rect(reserved, rect.top, reserved + width, rect.bottom)
     claiming = False
     if claim:
         # Keep claiming until the sibling has actually moved: once both
@@ -1328,6 +1584,27 @@ def sibling_surface_rects(taskbar: int, own_hwnd: int) -> tuple[Rect, ...]:
 
     _ = user32.EnumChildWindows(taskbar, visit, 0)
     return tuple(found)
+
+
+def notify_sibling_order(
+    taskbar: int, own_hwnd: int, *, priority: bool
+) -> None:
+    """Give siblings their half of an explicit swap and wake one fresh scan."""
+    user32 = _user32()
+    enum_proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @enum_proc_type
+    def visit(hwnd: int, _: int) -> bool:
+        if hwnd != own_hwnd:
+            name = ctypes.create_unicode_buffer(128)
+            _ = user32.GetClassNameW(hwnd, name, len(name))
+            if name.value.startswith(SIBLING_CLASS_PREFIXES):
+                _ = user32.PostMessageW(
+                    hwnd, WM_APP_SIBLING_ORDER, int(priority), 0
+                )
+        return True
+
+    _ = user32.EnumChildWindows(taskbar, visit, 0)
 
 
 def _taskbar_occupied_regions(

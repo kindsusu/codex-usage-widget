@@ -72,7 +72,7 @@ Signal: TypeAlias = tuple[SignalCommand, int, int]
 
 
 def _strip_placement(
-    config: WidgetConfig, *, claim_edge: bool = False
+    config: WidgetConfig, *, claim_edge: bool = False, yield_edge: bool = False
 ) -> StripPlacement:
     """Translate saved settings into the native worker's placement request."""
     return StripPlacement(
@@ -81,6 +81,7 @@ def _strip_placement(
         monitor=config.taskbar_host_monitor,
         claim_edge=claim_edge,
         edge_priority=config.taskbar_edge_priority,
+        yield_edge=yield_edge,
     )
 
 
@@ -536,12 +537,17 @@ class WidgetApplication:
         config = actions.set_taskbar_placement(
             self._config, zone=decision.zone, host=host, monitor=monitor
         )
-        if decision.claim_edge:
-            # Taking the edge by hand is a lasting decision, not a one-off.
-            config = actions.set_edge_priority(config, priority=True)
+        if decision.edge_priority is not None:
+            config = actions.set_edge_priority(
+                config, priority=decision.edge_priority
+            )
         self._save_and_render(config)
         self._taskbar.set_placement(
-            _strip_placement(config, claim_edge=decision.claim_edge)
+            _strip_placement(
+                config,
+                claim_edge=decision.claim_edge,
+                yield_edge=decision.yield_edge,
+            )
         )
 
     def _toggle_taskbar_visibility(self) -> None:

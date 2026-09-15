@@ -15,13 +15,21 @@ from codex_usage_widget.taskbar_native import (
     attach_transaction,
     premultiplied_bgra,
 )
-from codex_usage_widget.taskbar_placement import Rect
+from codex_usage_widget.taskbar_placement import (
+    DropDecision,
+    Rect,
+    TaskbarHostCandidate,
+)
+from codex_usage_widget.config import TaskbarZone
 
 
 class FakeUser32:
     def __init__(self) -> None:
         self.shown: list[int] = []
         self.posted: int = 0
+        self.messages: list[int] = []
+        self.timers: list[int] = []
+        self.killed_timers: list[int] = []
 
     def ShowWindow(self, hwnd: int, command: int) -> int:  # noqa: N802
         del hwnd
@@ -58,8 +66,21 @@ class FakeUser32:
     def PostMessageW(  # noqa: N802
         self, hwnd: int, message: int, wparam: int, lparam: int
     ) -> bool:
-        del hwnd, message, wparam, lparam
+        del hwnd, wparam, lparam
         self.posted += 1
+        self.messages.append(message)
+        return True
+
+    def SetTimer(  # noqa: N802
+        self, hwnd: int, timer_id: int, interval: int, callback: object
+    ) -> int:
+        del hwnd, interval, callback
+        self.timers.append(timer_id)
+        return timer_id
+
+    def KillTimer(self, hwnd: int, timer_id: int) -> bool:  # noqa: N802
+        del hwnd
+        self.killed_timers.append(timer_id)
         return True
 
     def SetThreadDpiAwarenessContext(self, context: object) -> object:  # noqa: N802
@@ -113,12 +134,20 @@ def _ignore_hwnd(_hwnd: int) -> None:
     pass
 
 
+def _ignore_sibling_order(
+    _taskbar: int, _own: int, *, priority: bool
+) -> None:
+    del priority
+
+
 @dataclass
 class FakeApi:
     style: int = WS_POPUP | 7
     parent: int = 0
     fail_position: bool = False
     positioned: bool = False
+    last_rect: Rect | None = None
+    order: list[str] | None = None
 
     def get_style(self, hwnd: int) -> int:
         del hwnd
@@ -137,10 +166,13 @@ class FakeApi:
         self.parent = parent
 
     def position(self, hwnd: int, parent: int, rect: Rect, origin: Rect) -> None:
-        del hwnd, parent, rect, origin
+        del hwnd, parent, origin
         if self.fail_position:
             raise OSError
         self.positioned = True
+        self.last_rect = rect
+        if self.order is not None:
+            self.order.append("position")
 
 
 def test_attachment_applies_verified_child_contract() -> None:
@@ -367,3 +399,230 @@ def test_observer_failure_publishes_none_then_next_scan_recovers(
     assert host._observed_target is None
     assert host._observe_once(10, stop_event, 1)
     assert host._observed_target == target
+
+
+def test_observer_ends_explicit_yield_after_sibling_takes_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = NativeTaskbarHost(lambda _x, _y: None, lambda _x, _y: None)
+    host._hwnd = 10
+    host._generation = 1
+    host._placement = taskbar_native.StripPlacement(
+        edge_priority=False, yield_edge=True
+    )
+    stop_event = Event()
+    host._stop_requested = stop_event
+    user32 = FakeUser32()
+    target = taskbar_native._Target(
+        20,
+        Rect(0, 1000, 1920, 1048),
+        Rect(173, 1001, 334, 1047),
+        96,
+        sibling_at_edge=True,
+    )
+    def find_target(
+        _hwnd: int, _placement: taskbar_native.StripPlacement, _waited: float
+    ) -> taskbar_native._Target:
+        return target
+
+    monkeypatch.setattr(taskbar_native, "_find_target", find_target)
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+
+    assert host._observe_once(10, stop_event, 1)
+
+    assert host._placement.edge_priority is False
+    assert host._placement.yield_edge is False
+
+
+def test_pending_swap_blocks_cached_layout_and_forces_zero_alpha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = NativeTaskbarHost(lambda _x, _y: None, lambda _x, _y: None)
+    host._hwnd = 10
+    host._attached = True
+    host._swap_pending = True
+    host._observed_target = taskbar_native._Target(
+        20, Rect(0, 1000, 1920, 1048), Rect(8, 1001, 169, 1047), 96
+    )
+    api = FakeApi()
+    user32 = FakeUser32()
+    alphas: list[int] = []
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+    monkeypatch.setattr(taskbar_native, "_Win32AttachmentApi", lambda: api)
+    monkeypatch.setattr(taskbar_native, "_system_uses_light_theme", lambda: True)
+    monkeypatch.setattr(taskbar_native, "_high_contrast", lambda: False)
+    def record_alpha(_hwnd: int, _image: Image.Image, alpha: int) -> None:
+        alphas.append(alpha)
+
+    monkeypatch.setattr(taskbar_native, "update_layered_bitmap", record_alpha)
+
+    host._apply_observed_target()
+    host._render_layered(10)
+    host._render_layered(10, 90)
+
+    assert not api.positioned
+    assert alphas == [0, 0]
+
+
+@pytest.mark.parametrize(
+    ("decision", "source", "sibling", "original_priority"),
+    [
+        (
+            DropDecision(
+                TaskbarHostCandidate(
+                    20, Rect(0, 1000, 1920, 1048), "", primary=True
+                ),
+                TaskbarZone.LEFT,
+                edge_priority=False,
+                yield_edge=True,
+            ),
+            Rect(8, 1000, 169, 1048),
+            Rect(173, 1000, 334, 1048),
+            True,
+        ),
+        (
+            DropDecision(
+                TaskbarHostCandidate(
+                    20, Rect(0, 1000, 1920, 1048), "", primary=True
+                ),
+                TaskbarZone.LEFT,
+                claim_edge=True,
+                edge_priority=True,
+            ),
+            Rect(173, 1000, 334, 1048),
+            Rect(8, 1000, 169, 1048),
+            False,
+        ),
+    ],
+)
+def test_both_swap_directions_turn_transparent_before_moving(
+    monkeypatch: pytest.MonkeyPatch,
+    decision: DropDecision,
+    source: Rect,
+    sibling: Rect,
+    original_priority: bool,
+) -> None:
+    order: list[str] = []
+
+    host = NativeTaskbarHost(lambda _x, _y: None, lambda _x, _y: None)
+    host._hwnd = 10
+    host._ghost = 99
+    api = FakeApi(parent=20, order=order)
+    user32 = FakeUser32()
+
+    def record_hidden_render(_hwnd: int) -> None:
+        order.append("alpha0")
+
+    def record_ghost_destroy(_ghost: int) -> None:
+        order.append("destroy-ghost")
+
+    monkeypatch.setattr(taskbar_native, "_Win32AttachmentApi", lambda: api)
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+    monkeypatch.setattr(
+        taskbar_native, "notify_sibling_order", _ignore_sibling_order
+    )
+    monkeypatch.setattr(taskbar_native, "destroy_ghost_window", record_ghost_destroy)
+    monkeypatch.setattr(host, "_render_layered", record_hidden_render)
+
+    assert host._begin_swap_transition(10, decision, source, (sibling,))
+
+    assert order[:3] == ["alpha0", "destroy-ghost", "position"]
+    assert host._swap_pending
+    assert host._swap_original_priority is original_priority
+    assert api.last_rect == sibling
+
+
+def test_swap_waits_for_fresh_target_before_revealing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = NativeTaskbarHost(lambda _x, _y: None, lambda _x, _y: None)
+    host._hwnd = 10
+    host._generation = 1
+    host._swap_pending = True
+    host._swap_deadline = 9_999_999_999.0
+    host._swap_source = Rect(8, 1000, 169, 1048)
+    host._swap_target = Rect(173, 1000, 334, 1048)
+    host._swap_parent = 20
+    host._swap_bounds = Rect(0, 1000, 1920, 1048)
+    host._placement = taskbar_native.StripPlacement(
+        edge_priority=False, yield_edge=True
+    )
+    stop_event = Event()
+    host._stop_requested = stop_event
+    user32 = FakeUser32()
+    fresh = taskbar_native._Target(
+        20,
+        Rect(0, 1000, 1920, 1048),
+        Rect(173, 1001, 334, 1047),
+        96,
+        sibling_at_edge=True,
+    )
+    def sibling_at_edge(_parent: int, _own: int) -> tuple[Rect, ...]:
+        return (Rect(8, 1000, 169, 1048),)
+
+    def find_fresh_target(
+        _hwnd: int,
+        _placement: taskbar_native.StripPlacement | None = None,
+        _waited: float = 0.0,
+    ) -> taskbar_native._Target:
+        return fresh
+
+    monkeypatch.setattr(taskbar_native, "sibling_surface_rects", sibling_at_edge)
+    monkeypatch.setattr(taskbar_native, "_find_target", find_fresh_target)
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+    monkeypatch.setattr(
+        taskbar_native, "notify_sibling_order", _ignore_sibling_order
+    )
+
+    host._settle_swap_transition(10)
+
+    assert host._swap_pending
+    assert host._swap_sibling_ready
+
+    assert host._observe_once(10, stop_event, 1)
+    assert user32.messages[-1] == taskbar_native.WM_APP_SWAP_READY
+    assert host._observed_target == fresh
+
+
+def test_swap_timeout_restores_source_and_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    priorities: list[bool] = []
+    host = NativeTaskbarHost(
+        lambda _x, _y: None,
+        lambda _x, _y: None,
+        on_priority=priorities.append,
+    )
+    host._hwnd = 10
+    host._swap_pending = True
+    host._swap_deadline = 1.0
+    host._swap_source = Rect(8, 1000, 169, 1048)
+    host._swap_target = Rect(173, 1000, 334, 1048)
+    host._swap_parent = 20
+    host._swap_bounds = Rect(0, 1000, 1920, 1048)
+    host._placement = taskbar_native.StripPlacement(
+        edge_priority=False, yield_edge=True
+    )
+    api = FakeApi(parent=20)
+    user32 = FakeUser32()
+    renders: list[int] = []
+    monkeypatch.setattr(taskbar_native, "monotonic", lambda: 2.0)
+    def no_siblings(_parent: int, _own: int) -> tuple[Rect, ...]:
+        return ()
+
+    monkeypatch.setattr(taskbar_native, "sibling_surface_rects", no_siblings)
+    monkeypatch.setattr(taskbar_native, "_Win32AttachmentApi", lambda: api)
+    monkeypatch.setattr(taskbar_native, "_user32", lambda: user32)
+    monkeypatch.setattr(
+        taskbar_native, "notify_sibling_order", _ignore_sibling_order
+    )
+    monkeypatch.setattr(host, "_render_layered", renders.append)
+
+    host._settle_swap_transition(10)
+
+    assert not host._swap_pending
+    assert api.last_rect == Rect(8, 1000, 169, 1048)
+    assert host._placement.edge_priority is True
+    assert host._placement.yield_edge is False
+    assert priorities == [True]
+    assert renders == [10]

@@ -1,5 +1,7 @@
 """Zone, host and drag-drop placement rules (pure logic only)."""
 
+import pytest
+
 from codex_usage_widget.config import TaskbarHost, TaskbarZone, WidgetConfig
 from codex_usage_widget.actions import set_edge_priority, set_taskbar_placement
 from codex_usage_widget.taskbar_placement import (
@@ -17,6 +19,7 @@ from codex_usage_widget.taskbar_placement import (
     decide_drop,
     drag_state,
     edge_anchor,
+    ghost_rect,
     ghost_origin,
     evicted_from_edge,
     place_taskbar_widget,
@@ -156,24 +159,30 @@ def test_drop_outside_every_taskbar_keeps_the_current_placement() -> None:
     assert decide_drop((500, 400), (PRIMARY, SECOND)) is None
 
 
-def test_drop_past_a_sibling_claims_the_edge_slot() -> None:
+@pytest.mark.parametrize("x", [8, 20, 87, 88, 120, 168])
+def test_drop_anywhere_on_a_left_sibling_claims_the_edge_slot(x: int) -> None:
     sibling = Rect(8, 1000, 169, 1048)
 
     inside = decide_drop((300, 1020), (PRIMARY,), siblings=(sibling,))
-    past = decide_drop((20, 1020), (PRIMARY,), siblings=(sibling,))
+    swap = decide_drop((x, 1020), (PRIMARY,), siblings=(sibling,))
 
     assert inside == DropDecision(PRIMARY, TaskbarZone.LEFT, claim_edge=False)
-    assert past == DropDecision(PRIMARY, TaskbarZone.LEFT, claim_edge=True)
+    assert swap == DropDecision(
+        PRIMARY, TaskbarZone.LEFT, claim_edge=True, edge_priority=True
+    )
 
 
-def test_drop_past_a_right_zone_sibling_claims_the_trailing_slot() -> None:
+@pytest.mark.parametrize("x", [1575, 1600, 1655, 1656, 1700, 1735, 1800])
+def test_drop_anywhere_on_a_right_sibling_claims_the_trailing_slot(x: int) -> None:
     sibling = Rect(1575, 1000, 1736, 1048)
 
     inside = decide_drop((1500, 1020), (PRIMARY,), siblings=(sibling,))
-    past = decide_drop((1800, 1020), (PRIMARY,), siblings=(sibling,))
+    swap = decide_drop((x, 1020), (PRIMARY,), siblings=(sibling,))
 
     assert inside == DropDecision(PRIMARY, TaskbarZone.RIGHT, claim_edge=False)
-    assert past == DropDecision(PRIMARY, TaskbarZone.RIGHT, claim_edge=True)
+    assert swap == DropDecision(
+        PRIMARY, TaskbarZone.RIGHT, claim_edge=True, edge_priority=True
+    )
 
 
 def test_a_sibling_on_another_taskbar_never_blocks_the_edge() -> None:
@@ -182,6 +191,200 @@ def test_a_sibling_on_another_taskbar_never_blocks_the_edge() -> None:
     decision = decide_drop((20, 1020), (PRIMARY, SECOND), siblings=(far,))
 
     assert decision == DropDecision(PRIMARY, TaskbarZone.LEFT, claim_edge=False)
+
+
+def test_a_sibling_outside_the_host_vertical_band_is_ignored() -> None:
+    above = Rect(8, 900, 169, 948)
+
+    decision = decide_drop((20, 1020), (PRIMARY,), siblings=(above,))
+
+    assert decision == DropDecision(PRIMARY, TaskbarZone.LEFT, claim_edge=False)
+
+
+def test_left_edge_strip_dropped_on_inner_sibling_yields_its_slot() -> None:
+    edge = Rect(8, 1000, 169, 1048)
+    inner = Rect(173, 1000, 334, 1048)
+
+    decision = decide_drop(
+        (500, 1020),
+        (PRIMARY,),
+        siblings=(inner,),
+        source=edge,
+        final_rect=Rect(420, 1000, 581, 1048),
+    )
+
+    assert decision == DropDecision(
+        PRIMARY,
+        TaskbarZone.LEFT,
+        claim_edge=False,
+        edge_priority=False,
+        yield_edge=True,
+    )
+
+
+def test_left_inner_strip_dropped_on_edge_sibling_claims_its_slot() -> None:
+    edge = Rect(8, 1000, 169, 1048)
+    inner = Rect(173, 1000, 334, 1048)
+
+    decision = decide_drop(
+        (20, 1020),
+        (PRIMARY,),
+        siblings=(edge,),
+        source=inner,
+        final_rect=Rect(-60, 1000, 101, 1048),
+    )
+
+    assert decision == DropDecision(
+        PRIMARY, TaskbarZone.LEFT, claim_edge=True, edge_priority=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "expected"),
+    [
+        (
+            Rect(8, 1000, 169, 1048),
+            Rect(173, 1000, 334, 1048),
+            DropDecision(
+                PRIMARY, TaskbarZone.LEFT, edge_priority=False, yield_edge=True
+            ),
+        ),
+        (
+            Rect(173, 1000, 334, 1048),
+            Rect(8, 1000, 169, 1048),
+            DropDecision(
+                PRIMARY,
+                TaskbarZone.LEFT,
+                claim_edge=True,
+                edge_priority=True,
+            ),
+        ),
+    ],
+)
+def test_full_overlap_keeps_the_existing_swap_gesture(
+    source: Rect, target: Rect, expected: DropDecision
+) -> None:
+    decision = decide_drop(
+        ((target.left + target.right) // 2, 1020),
+        (PRIMARY,),
+        siblings=(target,),
+        source=source,
+        final_rect=target,
+    )
+
+    assert decision == expected
+
+
+def test_cross_host_drop_on_a_sibling_claims_the_target_slot() -> None:
+    source = Rect(8, 1000, 169, 1048)
+    target = Rect(1928, 1000, 2089, 1048)
+
+    decision = decide_drop(
+        (2000, 1020),
+        (PRIMARY, SECOND),
+        siblings=(target,),
+        source=source,
+        final_rect=Rect(1920, 1000, 2081, 1048),
+    )
+
+    assert decision == DropDecision(
+        SECOND, TaskbarZone.LEFT, claim_edge=True, edge_priority=True
+    )
+
+
+@pytest.mark.parametrize("left", [254, 334, 400, 500])
+def test_left_edge_strip_reorders_after_passing_inner_sibling(left: int) -> None:
+    edge = Rect(8, 1000, 169, 1048)
+    inner = Rect(173, 1000, 334, 1048)
+
+    decision = decide_drop(
+        (left + 80, 1020),
+        (PRIMARY,),
+        siblings=(inner,),
+        source=edge,
+        final_rect=Rect(left, 1000, left + 161, 1048),
+    )
+
+    assert decision == DropDecision(
+        PRIMARY, TaskbarZone.LEFT, edge_priority=False, yield_edge=True
+    )
+
+
+def test_right_zone_reorder_is_the_mirror_of_left() -> None:
+    edge = Rect(1575, 1000, 1736, 1048)
+    inner = Rect(1410, 1000, 1571, 1048)
+
+    outward = decide_drop(
+        (1800, 1020),
+        (PRIMARY,),
+        siblings=(edge,),
+        source=inner,
+        final_rect=Rect(1720, 1000, 1881, 1048),
+    )
+    inward = decide_drop(
+        (1250, 1020),
+        (PRIMARY,),
+        siblings=(inner,),
+        source=edge,
+        final_rect=Rect(1170, 1000, 1331, 1048),
+    )
+
+    assert outward == DropDecision(
+        PRIMARY, TaskbarZone.RIGHT, claim_edge=True, edge_priority=True
+    )
+    assert inward == DropDecision(
+        PRIMARY, TaskbarZone.RIGHT, edge_priority=False, yield_edge=True
+    )
+
+
+def test_drop_on_the_original_side_of_a_sibling_keeps_order() -> None:
+    edge = Rect(8, 1000, 169, 1048)
+    inner = Rect(173, 1000, 334, 1048)
+
+    edge_stays = decide_drop(
+        (80, 1020),
+        (PRIMARY,),
+        siblings=(inner,),
+        source=edge,
+        final_rect=Rect(0, 1000, 161, 1048),
+    )
+    inner_stays = decide_drop(
+        (500, 1020),
+        (PRIMARY,),
+        siblings=(edge,),
+        source=inner,
+        final_rect=Rect(420, 1000, 581, 1048),
+    )
+
+    assert edge_stays == DropDecision(PRIMARY, TaskbarZone.LEFT)
+    assert inner_stays == DropDecision(PRIMARY, TaskbarZone.LEFT)
+
+
+def test_ghost_rect_makes_reorder_independent_of_grab_offset() -> None:
+    source = Rect(8, 1000, 169, 1048)
+    sibling = Rect(173, 1000, 334, 1048)
+    from_left_grab = ghost_rect((410, 1020), (18, 1020), source)
+    from_right_grab = ghost_rect((551, 1020), (159, 1020), source)
+
+    assert from_left_grab == from_right_grab == Rect(400, 1000, 561, 1048)
+    first = decide_drop(
+        (410, 1020),
+        (PRIMARY,),
+        siblings=(sibling,),
+        source=source,
+        final_rect=from_left_grab,
+    )
+    second = decide_drop(
+        (551, 1020),
+        (PRIMARY,),
+        siblings=(sibling,),
+        source=source,
+        final_rect=from_right_grab,
+    )
+
+    assert first == second == DropDecision(
+        PRIMARY, TaskbarZone.LEFT, edge_priority=False, yield_edge=True
+    )
 
 
 def test_dragged_rect_stays_inside_its_host() -> None:
