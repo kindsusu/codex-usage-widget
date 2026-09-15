@@ -18,6 +18,14 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    # The release set contains 실행.bat, and the runner's Python defaults its
+    # streams to cp1252 -- printing any Korean filename there raises
+    # UnicodeEncodeError and fails the build. PYTHONIOENCODING pins the streams
+    # (it outranks UTF-8 mode, so it is the one that actually decides here);
+    # PYTHONUTF8 covers the rest of the interpreter's encoding defaults.
+    env:
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
