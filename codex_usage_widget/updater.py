@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, final
 
 from codex_usage_widget import __version__
+from codex_usage_widget.launcher import launch_detached
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -67,7 +68,6 @@ _GATE_TIMEOUT: Final = 180.0
 _PIP_TIMEOUT: Final = 300.0
 _TAG_MARKER: Final = "/tag/"
 _NO_WINDOW: Final = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-_NEW_GROUP: Final = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
 
 class UpdateGate(StrEnum):
@@ -306,18 +306,8 @@ def install_staged(paths: UpdatePaths, staged: Collection[str]) -> None:
 
 
 def relaunch(root: Path) -> None:
-    """Start a replacement widget process from the freshly installed files."""
-    launcher = root / ".venv" / "Scripts" / "pythonw.exe"
-    fallback = Path(sys.executable).with_name("pythonw.exe")
-    if launcher.exists():
-        interpreter = str(launcher)
-    else:
-        interpreter = str(fallback) if fallback.exists() else sys.executable
-    _ = subprocess.Popen(  # noqa: S603 -- fixed argv, no shell, own entry point
-        [interpreter, str(root / "widget.pyw")],
-        cwd=str(root),
-        creationflags=_NEW_GROUP,
-    )
+    """Start a replacement outside any kill-on-close Job owned by the caller."""
+    launch_detached(root)
 
 
 def try_update(

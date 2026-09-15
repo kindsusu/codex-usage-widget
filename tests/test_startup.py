@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -27,12 +28,43 @@ def test_app_boundary_reports_unexpected_startup_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     categories: list[str] = []
+    lifecycle: list[tuple[str, type[BaseException] | None]] = []
 
     def fail() -> int:
         raise RuntimeError
 
+    def record_lifecycle(
+        event: startup.LifecycleEvent | Literal["fatal"],
+        error_type: type[BaseException] | None = None,
+    ) -> None:
+        lifecycle.append((event, error_type))
+
     monkeypatch.setattr("codex_usage_widget.runtime.run_widget", fail)
     monkeypatch.setattr(startup, "report_startup_problem", categories.append)
+    monkeypatch.setattr(
+        startup,
+        "report_lifecycle_event",
+        record_lifecycle,
+    )
 
     assert app.main() == 1
     assert categories == ["startup_error"]
+    assert lifecycle == [("fatal", RuntimeError)]
+
+
+def test_lifecycle_diagnostic_is_bounded_and_omits_exception_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    path = tmp_path / "CodexUsageWidget" / "lifecycle.log"
+    path.parent.mkdir(parents=True)
+    _ = path.write_bytes(b"old record\n" * 10_000)
+
+    error = RuntimeError("secret raw exception payload")
+    startup.report_lifecycle_event("fatal", type(error))
+
+    raw = path.read_bytes()
+    assert len(raw) <= 64 * 1024
+    assert raw.endswith(b" fatal:RuntimeError\n")
+    assert b"secret" not in raw

@@ -5,16 +5,14 @@ cd /d "%~dp0"
 if exist ".venv\Scripts\python.exe" (
     if not exist ".venv\Scripts\pythonw.exe" goto :missing_python
     set "PYTHON=.venv\Scripts\python.exe"
-    set "PYTHONW=.venv\Scripts\pythonw.exe"
 ) else (
     where python.exe >nul 2>&1 || goto :missing_python
     where pythonw.exe >nul 2>&1 || goto :missing_python
     set "PYTHON=python.exe"
-    set "PYTHONW=pythonw.exe"
 )
 
 "%PYTHON%" -c "import comtypes, PIL, pystray" >nul 2>&1 || goto :missing_dependencies
-start "" /b "%PYTHONW%" "%~dp0widget.pyw"
+"%PYTHON%" -m codex_usage_widget.launcher "%~dp0" || goto :launch_failed
 exit /b 0
 
 :missing_python
@@ -26,5 +24,11 @@ exit /b 1
 :missing_dependencies
 echo Required packages are missing.
 echo Run: "%PYTHON%" -m pip install -e .
+pause
+exit /b 1
+
+:launch_failed
+echo The widget could not be started independently.
+echo Check the Windows Management Instrumentation service, then try again.
 pause
 exit /b 1

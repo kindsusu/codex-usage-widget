@@ -52,7 +52,10 @@ The widget keeps itself current without any action from you:
 2. If the tag is strictly newer, it downloads `codex-usage-widget.zip` and `codex-usage-widget.zip.sha256` from that release.
 3. Three gates must all pass before anything on disk changes: the sha256 matches, every staged `.py`/`.pyw` compiles, and a separate interpreter runs `widget.pyw --selftest` against the staged tree and exits 0.
 4. The current `codex_usage_widget/`, `widget.pyw`, `assets/`, `pyproject.toml`, `실행.bat`, and `THIRD_PARTY_NOTICES.md` move into `.update-backup\`, the staged copies take their place, and `.venv\Scripts\python.exe -m pip install -e . --quiet` re-resolves dependencies. If any of that fails, the backup is moved straight back.
-5. The widget then restarts itself — you see it blink once.
+5. The widget then restarts itself through Windows Management Instrumentation,
+   outside the updater's process tree — you see it blink once. This keeps the
+   replacement running when the app or terminal that originally launched the
+   widget closes during an update.
 
 `widget_config.json` and `.venv\` are never inside the replaced set, so settings and the virtual environment survive every update. Every step is written to `update.log` beside the script (tags and failure categories only — no paths, no tokens). Turn it off with **자동 업데이트** in the right-click menu (`"auto_update": false` in `widget_config.json`); the running version is shown at the bottom of that same menu. To roll back by hand, exit the widget and copy `.update-backup\` back over the folder.
 

@@ -64,6 +64,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         from codex_usage_widget.runtime import run_widget  # noqa: PLC0415
 
         return run_widget()
-    except Exception:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
+    except Exception as error:  # noqa: BLE001  # noqa: BROAD_EXCEPT_OK
+        from codex_usage_widget.startup import report_lifecycle_event  # noqa: PLC0415
+
+        report_lifecycle_event("fatal", type(error))
         report_startup_problem("startup_error")
         return 1

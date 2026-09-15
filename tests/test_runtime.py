@@ -167,6 +167,33 @@ def test_duplicate_launch_requests_existing_instance_restore(
     assert requested == 1
 
 
+def test_run_widget_records_started_and_mainloop_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    root = SimpleNamespace(mainloop=lambda: None)
+
+    def build_application(_root: object) -> object:
+        return object()
+
+    monkeypatch.setattr(
+        "codex_usage_widget.runtime.windows.acquire_single_instance_status",
+        lambda: SingleInstanceStatus.ACQUIRED,
+    )
+    monkeypatch.setattr(
+        "codex_usage_widget.runtime.windows.create_restore_event", lambda: True
+    )
+    monkeypatch.setattr(
+        "codex_usage_widget.runtime.windows.release_single_instance", lambda: None
+    )
+    monkeypatch.setattr("codex_usage_widget.runtime.tk.Tk", lambda: root)
+    monkeypatch.setattr(runtime, "WidgetApplication", build_application)
+    monkeypatch.setattr(runtime, "report_lifecycle_event", events.append)
+
+    assert runtime.run_widget() == 0
+    assert events == ["started", "mainloop_return"]
+
+
 def test_legacy_duplicate_shows_clear_message_when_restore_event_is_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

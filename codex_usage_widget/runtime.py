@@ -15,6 +15,7 @@ from codex_usage_widget import config as widget_config
 from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import TaskbarHost, TaskbarZone
 from codex_usage_widget.fetcher import fetch_snapshot
+from codex_usage_widget.launcher import DetachedLaunchError
 from codex_usage_widget.opacity_popup import (
     OpacityPopupCallbacks,
     OpacityPopupController,
@@ -22,7 +23,7 @@ from codex_usage_widget.opacity_popup import (
 from codex_usage_widget.position_store import persist_window_position
 from codex_usage_widget.presentation import present_snapshot
 from codex_usage_widget.service import RefreshService
-from codex_usage_widget.startup import report_startup_problem
+from codex_usage_widget.startup import report_lifecycle_event, report_startup_problem
 from codex_usage_widget.taskbar import StripPlacement, TaskbarController
 from codex_usage_widget.taskbar_details import TaskbarDetailsPopup, monitor_metrics
 from codex_usage_widget.taskbar_model import build_taskbar_model
@@ -198,7 +199,7 @@ class WidgetApplication:
         _ = self._root.bind("<ButtonPress-1>", self._drag_start)
         _ = self._root.bind("<B1-Motion>", self._drag_move)
         _ = self._root.bind("<ButtonRelease-1>", self._drag_end)
-        _ = self._root.protocol("WM_DELETE_WINDOW", self.shutdown)
+        _ = self._root.protocol("WM_DELETE_WINDOW", self._user_exit)
 
     def _new_view(self) -> WidgetView:
         actions = ViewActions(
@@ -244,6 +245,13 @@ class WidgetApplication:
         windows.release_single_instance()
         self._root.destroy()
 
+    def _user_exit(self) -> None:
+        """Record an explicit exit request before tearing down the process."""
+        if self._closing:
+            return
+        report_lifecycle_event("user_exit")
+        self.shutdown()
+
     def _poll(self) -> None:
         if self._closing:
             return
@@ -274,7 +282,7 @@ class WidgetApplication:
                 else:
                     self._apply_visibility(force=True)
             case "exit":
-                self.shutdown()
+                self._user_exit()
                 return True
             case "details":
                 self._visibility_panel.close()
@@ -401,10 +409,21 @@ class WidgetApplication:
     def _restart_into_update(self) -> None:
         """Hand over to a fresh process running the newly installed files."""
         widget_config.save_config(self._config_path, self._config)
+        report_lifecycle_event("update_restart")
         # Release the singleton BEFORE spawning: the replacement would
         # otherwise see this still-alive process and exit immediately.
         windows.release_single_instance()
-        updater.relaunch(_INSTALL_ROOT)
+        try:
+            updater.relaunch(_INSTALL_ROOT)
+        except DetachedLaunchError:
+            # Keep the working process alive when the handoff itself failed.
+            # Reclaim both named objects that were released for the attempted
+            # replacement so later manual launches still restore this instance.
+            status = windows.acquire_single_instance_status()
+            if status is windows.SingleInstanceStatus.ACQUIRED:
+                _ = windows.create_restore_event()
+            report_startup_problem("launch_error")
+            return
         self.shutdown()
 
     def _periodic_refresh(self) -> None:
@@ -584,7 +603,7 @@ class WidgetApplication:
             _secondary_taskbar_exists,
             self._toggle_topmost,
             self._toggle_auto_update,
-            self.shutdown,
+            self._user_exit,
             self._set_scale,
             self._set_pet,
             self._menu_opened,
@@ -691,7 +710,9 @@ def run_widget() -> int:
         _ = windows.create_restore_event()
         root = tk.Tk()
         _ = WidgetApplication(root)
+        report_lifecycle_event("started")
         root.mainloop()
+        report_lifecycle_event("mainloop_return")
     finally:
         windows.release_single_instance()
     return 0

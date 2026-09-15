@@ -176,6 +176,7 @@ zip 항목 이름은 `is_managed_member`로 걸러 낸다 — 절대 경로·드
 - `runtime.py` — 기동 +20초, 이후 12시간 주기. 네트워크·게이트·파일 이동은 데몬 스레드에서 돌고 결과는 `Queue`로 `_poll`에 돌아온다(기존 `RefreshService`·taskbar signal과 같은 패턴, Tk를 다른 스레드에서 만지지 않는다).
 - `menus.py` — "자동 업데이트" 체크와 맨 아래 비활성 "버전 v…" 항목. `BooleanVar`는 기존 규칙대로 반환 튜플에 담아 모달 루프 동안 살려 둔다.
 - 기록은 `update.log`에 버전 태그와 실패 게이트 이름만 남긴다. 예외 메시지에는 경로가 섞일 수 있으므로 타입 이름만 적는다.
+- 실행 배치와 업데이트 재시작은 `launcher.py`의 같은 경계를 쓴다. Windows에서는 WMI `Win32_Process.Create`를 먼저 사용해 호출자의 kill-on-close Job 밖에서 만들고, WMI가 거부되면 `CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`로 한 번 대체 시도한다. 둘 다 실패하면 오류를 표시하며 업데이트 중인 기존 위젯은 종료하지 않는다.
 
 ### 첫 릴리스가 3연속 실패한 이유 (2026-09-15에 해소, v0.3.0 발행)
 
