@@ -321,7 +321,9 @@ def test_stopped_observer_does_not_publish_scanned_target(
     old_stop.set()
     user32 = FakeUser32()
     def no_target(
-        _hwnd: int, _placement: taskbar_native.StripPlacement | None = None
+        _hwnd: int,
+        _placement: taskbar_native.StripPlacement | None = None,
+        _waited: float = 0.0,
     ) -> taskbar_native._Target | None:
         return None
 
@@ -349,7 +351,9 @@ def test_observer_failure_publishes_none_then_next_scan_recovers(
     scans = iter((RuntimeError(), target))
 
     def scan(
-        _hwnd: int, _placement: taskbar_native.StripPlacement | None = None
+        _hwnd: int,
+        _placement: taskbar_native.StripPlacement | None = None,
+        _waited: float = 0.0,
     ) -> taskbar_native._Target:
         value = next(scans)
         if isinstance(value, Exception):

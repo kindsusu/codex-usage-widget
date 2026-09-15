@@ -65,6 +65,7 @@ SignalCommand: TypeAlias = Literal[
     "mini",
     "taskbar",
     "taskbar_drop",
+    "taskbar_priority",
     "refresh",
 ]
 Signal: TypeAlias = tuple[SignalCommand, int, int]
@@ -79,6 +80,7 @@ def _strip_placement(
         host=config.taskbar_host,
         monitor=config.taskbar_host_monitor,
         claim_edge=claim_edge,
+        edge_priority=config.taskbar_edge_priority,
     )
 
 
@@ -146,9 +148,11 @@ class WidgetApplication:
             lambda x, y: self._signals.put(("visibility_panel", x, y)),
             self._queue_taskbar_menu,
             self._queue_taskbar_drop,
+            self._queue_edge_priority,
         )
         self._taskbar.set_placement(_strip_placement(self._config))
         self._drops: Queue[DropDecision] = Queue()
+        self._priorities: Queue[bool] = Queue()
         self._visibility_panel = VisibilityPanel(
             root,
             VisibilityCallbacks(
@@ -295,6 +299,8 @@ class WidgetApplication:
                 self._toggle_taskbar_visibility()
             case "taskbar_drop":
                 self._apply_taskbar_drop()
+            case "taskbar_priority":
+                self._apply_edge_priority()
             case "refresh":
                 self.refresh()
         return False
@@ -481,11 +487,36 @@ class WidgetApplication:
                 if host is TaskbarHost.SECONDARY
                 else ""
             )
+        if host is TaskbarHost.SECONDARY and not resolved:
+            # Menu selection: pin the device name of the secondary bar we are
+            # about to use, so a later reconnect returns to the same screen.
+            resolved = next(
+                (item.monitor for item in taskbar_hosts()
+                 if not item.primary and item.monitor),
+                "",
+            )
         config = actions.set_taskbar_placement(
             self._config, zone=zone, host=host, monitor=resolved
         )
         self._save_and_render(config)
         self._taskbar.set_placement(_strip_placement(config))
+
+    def _queue_edge_priority(self, priority: bool) -> None:
+        """Persist an edge-order change the native worker just observed."""
+        self._priorities.put(priority)
+        self._signals.put(("taskbar_priority", 0, 0))
+
+    def _apply_edge_priority(self) -> None:
+        """Store the new order; the strip is already where it belongs."""
+        try:
+            priority = self._priorities.get_nowait()
+        except Empty:
+            return
+        if priority == self._config.taskbar_edge_priority:
+            return
+        self._save_and_render(
+            actions.set_edge_priority(self._config, priority=priority)
+        )
 
     def _queue_taskbar_drop(self, decision: DropDecision) -> None:
         """Hand a native drag result to the Tk thread."""
@@ -505,6 +536,9 @@ class WidgetApplication:
         config = actions.set_taskbar_placement(
             self._config, zone=decision.zone, host=host, monitor=monitor
         )
+        if decision.claim_edge:
+            # Taking the edge by hand is a lasting decision, not a one-off.
+            config = actions.set_edge_priority(config, priority=True)
         self._save_and_render(config)
         self._taskbar.set_placement(
             _strip_placement(config, claim_edge=decision.claim_edge)

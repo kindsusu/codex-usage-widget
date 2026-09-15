@@ -21,9 +21,12 @@ class TaskbarController:
         on_visibility: Callable[[int, int], None],
         on_menu: Callable[[int, int], None],
         on_move: Callable[[DropDecision], None] | None = None,
+        on_priority: Callable[[bool], None] | None = None,
     ) -> None:
         """Bind screen-coordinate callbacks without starting native work."""
-        self._host = NativeTaskbarHost(on_details, on_visibility, on_menu, on_move)
+        self._host = NativeTaskbarHost(
+            on_details, on_visibility, on_menu, on_move, on_priority
+        )
 
     @property
     def available(self) -> bool:

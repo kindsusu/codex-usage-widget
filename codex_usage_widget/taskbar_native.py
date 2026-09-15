@@ -14,6 +14,7 @@ from contextlib import suppress
 from ctypes import wintypes
 from dataclasses import dataclass, replace
 from threading import Event, Lock, Thread, get_ident
+from time import monotonic
 from typing import TYPE_CHECKING, Final, Literal, Protocol, final
 
 if TYPE_CHECKING:
@@ -26,16 +27,27 @@ if TYPE_CHECKING:
 from codex_usage_widget.config import TaskbarHost, TaskbarZone
 from codex_usage_widget.taskbar_model import TaskbarModel
 from codex_usage_widget.taskbar_placement import (
+    CLAIM_YIELD_SCANS,
+    EDGE_EXPLICIT_SECONDS,
+    EDGE_HOLD_SECONDS,
+    EDGE_MARGIN,
+    EDGE_TIE_BREAK_WINNER,
     LEADING_BAND,
     DropDecision,
     Rect,
+    StartSlot,
     TaskbarGeometry,
     TaskbarHostCandidate,
     choose_host,
     clamp_to_host,
     decide_drop,
+    edge_anchor,
+    evicted_from_edge,
     logical_pixels,
     place_taskbar_widget,
+    second_slot_left,
+    should_yield_edge,
+    start_slot,
 )
 
 WM_DESTROY: Final = 0x0002
@@ -245,6 +257,8 @@ class StripPlacement:
     host: TaskbarHost = TaskbarHost.PRIMARY
     monitor: str = ""
     claim_edge: bool = False
+    # SHARED STRIP CONTRACT: True means this strip owns the edge slot.
+    edge_priority: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +272,9 @@ class _Target:
     host_fallback: bool = False
     # True while we are still holding a slot a sibling has not vacated yet.
     claiming: bool = False
+    # Whether this placement is the edge slot, and whether a sibling holds it.
+    at_edge: bool = False
+    sibling_at_edge: bool = False
 
 
 def taskbar_hosts() -> tuple[TaskbarHostCandidate, ...]:
@@ -326,6 +343,7 @@ class NativeTaskbarHost:
         on_visibility: Callable[[int, int], None],
         on_menu: Callable[[int, int], None] | None = None,
         on_move: Callable[[DropDecision], None] | None = None,
+        on_priority: Callable[[bool], None] | None = None,
     ) -> None:
         """Bind callbacks and initialize thread-safe state."""
         self._on_details = on_details
@@ -333,6 +351,9 @@ class NativeTaskbarHost:
         self._on_menu = on_visibility if on_menu is None else on_menu
         self._on_move: Callable[[DropDecision], None] = (
             (lambda _decision: None) if on_move is None else on_move
+        )
+        self._on_priority: Callable[[bool], None] = (
+            (lambda _priority: None) if on_priority is None else on_priority
         )
         self._lock = Lock()
         self._ready = Event()
@@ -353,6 +374,11 @@ class NativeTaskbarHost:
         self._placement = StripPlacement()
         # Drag state: press point, the window rect at press time, and whether
         # the pointer has passed the system drag threshold yet.
+        self._started_at = monotonic()
+        self._was_at_edge = False
+        self._claim_scans = 0
+        # When a user drag last put this strip on the edge by hand.
+        self._explicit_until = 0.0
         self._press: tuple[int, int] | None = None
         self._press_rect: Rect | None = None
         self._dragging = False
@@ -388,6 +414,9 @@ class NativeTaskbarHost:
             if placement == self._placement:
                 return
             self._placement = placement
+            if placement.claim_edge:
+                # A hand-placed claim outranks the sibling's automatic one.
+                self._explicit_until = monotonic() + EDGE_EXPLICIT_SECONDS
             hwnd = self._hwnd
         if hwnd:
             _ = _user32().PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
@@ -800,12 +829,22 @@ class NativeTaskbarHost:
     def _observe_once(self, hwnd: int, stop_event: Event, generation: int) -> bool:
         with self._lock:
             placement = self._placement
+            started = self._started_at
+            was_at_edge = self._was_at_edge
+            claim_scans = self._claim_scans
         try:
-            target = _find_target(hwnd, placement)
+            target = _find_target(hwnd, placement, monotonic() - started)
         except Exception:  # noqa: BLE001
             target = None
         if stop_event.is_set():
             return False
+        if target is not None:
+            self._settle_edge_priority(
+                placement, target, was_at_edge=was_at_edge,
+                claim_scans=claim_scans,
+            )
+        with self._lock:
+            self._was_at_edge = target is not None and target.at_edge
         if placement.claim_edge and target is not None and not target.claiming:
             # The sibling stepped aside: stop ignoring it, the slot is ours.
             with self._lock:
@@ -820,6 +859,54 @@ class NativeTaskbarHost:
                 return False
             self._observed_target = target
         return bool(_user32().PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0))
+
+    def _settle_edge_priority(
+        self,
+        placement: StripPlacement,
+        target: _Target,
+        *,
+        was_at_edge: bool,
+        claim_scans: int,
+    ) -> None:
+        """Keep the saved edge order in step with what actually happened.
+
+        SHARED STRIP CONTRACT. Both rules are one-way so they terminate:
+        losing the edge to a sibling's claim writes priority False, and a
+        claim the sibling refuses is abandoned by the Claude widget only --
+        this widget is the static tie-break winner and keeps claiming.
+        """
+        now = monotonic()
+        if evicted_from_edge(
+            was_at_edge=was_at_edge,
+            at_edge_now=target.at_edge,
+            sibling_at_edge=target.sibling_at_edge,
+        ):
+            self._yield_edge()
+            return
+        contested = bool(placement.edge_priority and target.claiming)
+        scans = claim_scans + 1 if contested else 0
+        with self._lock:
+            self._claim_scans = scans
+            explicit_until = self._explicit_until
+            started = self._started_at
+        if scans >= CLAIM_YIELD_SCANS and should_yield_edge(
+            contested=contested,
+            explicit_recent=now < explicit_until,
+            tie_break_winner=EDGE_TIE_BREAK_WINNER,
+            uptime=now - started,
+        ):
+            # The sibling is sitting on our slot and the rules say it stays.
+            self._yield_edge()
+
+    def _yield_edge(self) -> None:
+        """Give up the edge slot and let the application persist the order."""
+        with self._lock:
+            self._placement = replace(
+                self._placement, edge_priority=False, claim_edge=False
+            )
+            self._claim_scans = 0
+        with suppress(Exception):
+            self._on_priority(False)
 
     def _apply_observed_target(self) -> None:
         with self._lock:
@@ -1004,7 +1091,9 @@ def update_layered_bitmap(hwnd: int, image: Image.Image) -> None:
 
 
 def _find_target(
-    own_hwnd: int, placement: StripPlacement | None = None
+    own_hwnd: int,
+    placement: StripPlacement | None = None,
+    waited: float = EDGE_HOLD_SECONDS,
 ) -> _Target | None:
     user32 = _user32()
     placement = StripPlacement() if placement is None else placement
@@ -1044,24 +1133,51 @@ def _find_target(
         regions,
         siblings,
     )
-    result = place_taskbar_widget(
-        geometry, dpi=dpi, zone=placement.zone, claim_edge=placement.claim_edge
+    gap = logical_pixels(4, dpi)
+    margin = logical_pixels(EDGE_MARGIN, dpi)
+    width = logical_pixels(161, dpi)
+    anchor = edge_anchor(
+        bounds, notification, zone=placement.zone, gap=gap, margin=margin,
+        width=width,
     )
-    if result.rect is None:
+    # SHARED STRIP CONTRACT: the edge race is decided here, where the live
+    # sibling rects already are.
+    mode = start_slot(
+        priority=placement.edge_priority,
+        sibling_seen=bool(siblings),
+        waited=waited,
+    )
+    claim = placement.claim_edge or mode is StartSlot.CLAIM
+    result = place_taskbar_widget(
+        geometry, dpi=dpi, zone=placement.zone, claim_edge=claim
+    )
+    rect = result.rect
+    if rect is None:
         return None
+    if mode is StartSlot.RESERVE:
+        # Keep the edge free for a sibling that has not started yet.
+        reserved = second_slot_left(
+            bounds, notification, zone=placement.zone, gap=gap, margin=margin,
+            width=width,
+        )
+        candidate_rect = Rect(reserved, rect.top, reserved + width, rect.bottom)
+        if not any(_intersects(candidate_rect, region) for region in regions):
+            rect = candidate_rect
     claiming = False
-    if placement.claim_edge:
+    if claim:
         # Keep claiming until the sibling has actually moved: once both
         # placements agree, the slot is ours without ignoring anyone.
         settled = place_taskbar_widget(geometry, dpi=dpi, zone=placement.zone)
-        claiming = settled.rect != result.rect
+        claiming = settled.rect != rect
     return _Target(
         taskbar,
         bounds,
-        result.rect,
+        rect,
         dpi,
         host_fallback=choice.fallback,
         claiming=claiming,
+        at_edge=rect.left == anchor,
+        sibling_at_edge=any(sibling.left == anchor for sibling in siblings),
     )
 
 

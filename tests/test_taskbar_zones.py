@@ -1,16 +1,21 @@
 """Zone, host and drag-drop placement rules (pure logic only)."""
 
 from codex_usage_widget.config import TaskbarHost, TaskbarZone, WidgetConfig
-from codex_usage_widget.actions import set_taskbar_placement
+from codex_usage_widget.actions import set_edge_priority, set_taskbar_placement
 from codex_usage_widget.taskbar_placement import (
     DropDecision,
+    StartSlot,
     Rect,
     TaskbarGeometry,
     TaskbarHostCandidate,
     choose_host,
     clamp_to_host,
     decide_drop,
+    edge_anchor,
+    evicted_from_edge,
     place_taskbar_widget,
+    second_slot_left,
+    start_slot,
 )
 
 DISPLAY2 = "\\\\.\\DISPLAY2"
@@ -195,3 +200,74 @@ def test_placement_action_clears_the_monitor_for_a_primary_host() -> None:
     assert secondary.taskbar_host_monitor == DISPLAY2
     assert back.taskbar_host is TaskbarHost.PRIMARY
     assert back.taskbar_host_monitor == ""
+
+
+def test_start_slot_gives_the_edge_to_the_priority_twin() -> None:
+    assert start_slot(priority=True, sibling_seen=False, waited=0.0) is (
+        StartSlot.CLAIM
+    )
+    assert start_slot(priority=True, sibling_seen=True, waited=99.0) is (
+        StartSlot.CLAIM
+    )
+
+
+def test_start_slot_waits_in_the_second_slot_for_a_missing_sibling() -> None:
+    assert start_slot(priority=False, sibling_seen=False, waited=0.0) is (
+        StartSlot.RESERVE
+    )
+    assert start_slot(priority=False, sibling_seen=False, waited=9.9) is (
+        StartSlot.RESERVE
+    )
+    # a solo install must not sit one slot away from the edge for ever
+    assert start_slot(priority=False, sibling_seen=False, waited=10.0) is (
+        StartSlot.SWEEP
+    )
+    # the sibling showed up: the ordinary sweep lands beside it
+    assert start_slot(priority=False, sibling_seen=True, waited=0.0) is (
+        StartSlot.SWEEP
+    )
+
+
+def test_edge_and_second_slots_mirror_each_other() -> None:
+    bar = Rect(0, 1000, 1920, 1048)
+    notify = Rect(1740, 1000, 1920, 1048)
+    left_edge = edge_anchor(
+        bar, notify, zone=TaskbarZone.LEFT, gap=4, margin=8, width=161
+    )
+    right_edge = edge_anchor(
+        bar, notify, zone=TaskbarZone.RIGHT, gap=4, margin=8, width=161
+    )
+
+    assert left_edge == 8
+    assert right_edge == 1575
+    assert second_slot_left(
+        bar, notify, zone=TaskbarZone.LEFT, gap=4, margin=8, width=161
+    ) == 173
+    assert second_slot_left(
+        bar, notify, zone=TaskbarZone.RIGHT, gap=4, margin=8, width=161
+    ) == 1410
+
+
+def test_eviction_is_only_reported_when_a_sibling_took_the_edge() -> None:
+    assert evicted_from_edge(
+        was_at_edge=True, at_edge_now=False, sibling_at_edge=True
+    )
+    # moved off the edge for another reason (no sibling there): not an eviction
+    assert not evicted_from_edge(
+        was_at_edge=True, at_edge_now=False, sibling_at_edge=False
+    )
+    assert not evicted_from_edge(
+        was_at_edge=False, at_edge_now=False, sibling_at_edge=True
+    )
+    assert not evicted_from_edge(
+        was_at_edge=True, at_edge_now=True, sibling_at_edge=False
+    )
+
+
+def test_edge_priority_action_records_the_order() -> None:
+    demoted = set_edge_priority(WidgetConfig(), priority=False)
+    promoted = set_edge_priority(demoted, priority=True)
+
+    assert WidgetConfig().taskbar_edge_priority is True   # Codex default
+    assert demoted.taskbar_edge_priority is False
+    assert promoted.taskbar_edge_priority is True

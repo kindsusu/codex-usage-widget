@@ -79,6 +79,10 @@ class WidgetConfig:
     # ``GetMonitorInfoW`` szDevice of the secondary taskbar's monitor, as in
     # the ``DISPLAY2`` device path. Empty for the primary taskbar.
     taskbar_host_monitor: str = ""
+    # SHARED STRIP CONTRACT -- the twins' ONLY asymmetric default: True here,
+    # False in the Claude widget, so the approved order (Codex at the edge,
+    # Claude beside it) survives a reboot whichever starts first.
+    taskbar_edge_priority: bool = True
 
     def __post_init__(self) -> None:
         """Reject invalid direct construction before settings reach the UI."""
@@ -114,6 +118,7 @@ class WidgetConfig:
                 type(self.taskbar_host_monitor) is str
                 and len(self.taskbar_host_monitor) <= _MAX_DEVICE_NAME,
             ),
+            ("taskbar_edge_priority", type(self.taskbar_edge_priority) is bool),
         )
         invalid = next((field for field, valid in checks if not valid), None)
         if invalid is not None:
@@ -161,6 +166,7 @@ class _ConfigData(TypedDict):
     taskbar_zone: str
     taskbar_host: str
     taskbar_host_monitor: str
+    taskbar_edge_priority: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +307,10 @@ def _parse_config(values: Mapping[str, ConfigJson]) -> WidgetConfig:
             values.get("taskbar_host_monitor"),
             defaults.taskbar_host_monitor,
         ),
+        taskbar_edge_priority=_boolean(
+            values.get("taskbar_edge_priority"),
+            default=defaults.taskbar_edge_priority,
+        ),
     )
 
 
@@ -414,4 +424,5 @@ def _to_data(config: WidgetConfig) -> _ConfigData:
         "taskbar_zone": config.taskbar_zone.value,
         "taskbar_host": config.taskbar_host.value,
         "taskbar_host_monitor": config.taskbar_host_monitor,
+        "taskbar_edge_priority": config.taskbar_edge_priority,
     }

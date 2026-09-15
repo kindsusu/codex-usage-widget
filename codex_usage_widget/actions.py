@@ -133,6 +133,16 @@ def set_taskbar_placement(
     )
 
 
+def set_edge_priority(config: WidgetConfig, *, priority: bool) -> WidgetConfig:
+    """Record whether this strip owns the edge slot of its zone.
+
+    SHARED STRIP CONTRACT -- a drag that evicts the sibling sets True here and
+    the evicted twin stores False when it notices, which is the only way the
+    two processes agree on an order without talking to each other.
+    """
+    return replace(config, taskbar_edge_priority=priority)
+
+
 def toggle_taskbar_visibility(config: WidgetConfig) -> WidgetConfig:
     """Flip whether the native taskbar usage indicator is shown."""
     return replace(config, taskbar_visible=not config.taskbar_visible)

@@ -68,6 +68,31 @@ class PlacementResult:
 # whatever its UIA control type). Mirrored in the Claude widget.
 EDGE_MARGIN: Final = 8
 LEADING_BAND: Final = 200
+# SHARED STRIP CONTRACT -- deterministic sibling order without any IPC.
+# Exactly one twin owns the edge: ``taskbar_edge_priority`` defaults to True
+# here and False in the Claude widget, which preserves the approved layout
+# (Codex at the edge, Claude beside it) across reboots no matter which one
+# starts first. A strip without priority waits this long for its sibling to
+# appear before taking the edge itself, so a solo install never sits one slot
+# away from the edge for good.
+EDGE_HOLD_SECONDS: Final = 10.0
+# A claim the sibling refuses to honour means both strips want the same slot.
+# Nobody can see the other's settings, so the contest is resolved from three
+# facts each side knows about ITSELF: was I just dragged here, am I the static
+# tie-break winner, and how long have I been running.
+# Two scans (~3s) is enough evidence of a real contest while still
+# surviving a single bad UIA read; longer leaves the strips visibly
+# overlapped after a drag.
+CLAIM_YIELD_SCANS: Final = 2
+# A drag-claim outranks everything for this long -- long enough for the other
+# side to notice the contest and step aside.
+EDGE_EXPLICIT_SECONDS: Final = 30.0
+# A contest inside this window after startup is a boot race, not a user
+# action, so the static winner keeps the slot. Later contests mean the user
+# just dragged the sibling onto it, and even the winner gives way.
+EDGE_STARTUP_GRACE: Final = 15.0
+# Codex owns the static tie-break; the Claude widget sets this False.
+EDGE_TIE_BREAK_WINNER: Final = True
 
 
 def logical_pixels(value: int, dpi: int) -> int:
@@ -318,3 +343,99 @@ def clamp_to_host(rect: Rect, host: Rect) -> Rect:
     width = rect.width
     left = max(host.left, min(rect.left, host.right - width))
     return Rect(left, rect.top, left + width, rect.bottom)
+
+
+# ---- deterministic start slot (pure) --------------------------------------
+# SHARED STRIP CONTRACT -- mirrored in the Claude widget.
+
+
+def edge_anchor(  # noqa: PLR0913
+    taskbar: Rect,
+    notification: Rect,
+    *,
+    zone: TaskbarZone,
+    gap: int,
+    margin: int,
+    width: int,
+) -> int:
+    """Left coordinate of the slot flush with the zone's outer edge."""
+    if zone is TaskbarZone.LEFT:
+        return taskbar.left + margin
+    return min(taskbar.right - margin, notification.left - gap) - width
+
+
+def second_slot_left(  # noqa: PLR0913
+    taskbar: Rect,
+    notification: Rect,
+    *,
+    zone: TaskbarZone,
+    gap: int,
+    margin: int,
+    width: int,
+) -> int:
+    """Left coordinate of the slot a sibling would leave for us."""
+    anchor = edge_anchor(
+        taskbar, notification, zone=zone, gap=gap, margin=margin, width=width
+    )
+    if zone is TaskbarZone.LEFT:
+        return anchor + width + gap
+    return anchor - width - gap
+
+
+class StartSlot(StrEnum):
+    """What a strip should do with the edge slot on this scan."""
+
+    CLAIM = "claim"          # take the edge, pushing a sibling aside
+    RESERVE = "reserve"      # hold the second slot, waiting for the sibling
+    SWEEP = "sweep"          # ordinary measured placement
+
+
+def start_slot(
+    *,
+    priority: bool,
+    sibling_seen: bool,
+    waited: float,
+    hold: float = EDGE_HOLD_SECONDS,
+) -> StartSlot:
+    """Decide how this strip competes for the edge on this scan."""
+    if priority:
+        return StartSlot.CLAIM
+    if sibling_seen:
+        return StartSlot.SWEEP      # the sweep lands beside the sibling
+    if waited < hold:
+        return StartSlot.RESERVE    # keep the edge free a little longer
+    return StartSlot.SWEEP
+
+
+def evicted_from_edge(
+    *, was_at_edge: bool, at_edge_now: bool, sibling_at_edge: bool
+) -> bool:
+    """True when a sibling's claim has just taken our edge slot."""
+    return was_at_edge and not at_edge_now and sibling_at_edge
+
+
+def should_yield_edge(
+    *,
+    contested: bool,
+    explicit_recent: bool,
+    tie_break_winner: bool,
+    uptime: float,
+    grace: float = EDGE_STARTUP_GRACE,
+) -> bool:
+    """Whether this strip must give up its edge claim.
+
+    SHARED STRIP CONTRACT. The rules are ordered so that exactly one side
+    yields in every combination, with no message passing:
+
+    * a strip the user just dragged onto the edge never yields;
+    * the tie-break loser (Claude) always yields a contested claim;
+    * the winner (Codex) yields only when the contest starts after its own
+      startup grace, which is precisely when a user drag caused it.
+    """
+    if not contested:
+        return False
+    if explicit_recent:
+        return False
+    if not tie_break_winner:
+        return True
+    return uptime > grace
