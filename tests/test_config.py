@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
@@ -11,6 +12,8 @@ from codex_usage_widget.assets import PET_NAMES
 from codex_usage_widget.config import (
     ConfigValidationError,
     ConfigWriteError,
+    TaskbarHost,
+    TaskbarZone,
     ThemeName,
     WidgetConfig,
     load_config,
@@ -102,6 +105,32 @@ def test_select_initial_config_canonicalizes_legacy_hidden_mini_state() -> None:
     assert migrated.mini_mode is False
     assert migrated.taskbar_visible is False
     assert migrated.pet == legacy.pet
+
+
+def test_initial_config_resets_scales_and_preserves_other_settings() -> None:
+    configured = WidgetConfig(
+        theme=ThemeName.DARK,
+        opacity=0.7,
+        scale=1.5,
+        mini_mode=True,
+        mini_scale=0.75,
+        smart_topmost=False,
+        desktop_visible=True,
+        taskbar_visible=False,
+        auto_update=False,
+        pet="image (10)",
+        refresh_seconds=300,
+        position=WindowPosition(x=321, y=654),
+        taskbar_zone=TaskbarZone.RIGHT,
+        taskbar_host=TaskbarHost.SECONDARY,
+        taskbar_host_monitor=r"\\.\DISPLAY2",
+        taskbar_edge_priority=False,
+    )
+
+    initialized, changed = select_initial_config(configured)
+
+    assert changed is True
+    assert initialized == replace(configured, scale=1.0, mini_scale=1.0)
 
 
 def test_widget_config_rejects_out_of_range_values_without_echoing_them() -> None:

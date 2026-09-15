@@ -191,14 +191,20 @@ def load_config(path: Path) -> WidgetConfig:
 
 
 def select_initial_config(config: WidgetConfig) -> tuple[WidgetConfig, bool]:
-    """Canonicalize legacy display flags and assign a pet when unset.
+    """Canonicalize startup-only settings and assign a pet when unset.
 
     Configs whose pet is no longer in the pool -- notably the retired
     ``claudecode`` mascot, which loads back as ``None`` -- are treated as unset
     and rerolled to a random remaining pet so the new choice is persisted.
+
+    Desktop scales always start at 100%.  Scale controls can still persist
+    changes during the running session, but the next launch resets both modes.
     """
-    changed = config.pet not in PET_NAMES or (
-        not config.desktop_visible and config.mini_mode
+    changed = (
+        config.pet not in PET_NAMES
+        or (not config.desktop_visible and config.mini_mode)
+        or config.scale != 1.0
+        or config.mini_scale != 1.0
     )
     if not changed:
         return config, False
@@ -207,6 +213,8 @@ def select_initial_config(config: WidgetConfig) -> tuple[WidgetConfig, bool]:
     config = replace(
         config,
         mini_mode=config.mini_mode if config.desktop_visible else False,
+        scale=1.0,
+        mini_scale=1.0,
     )
     if config.pet in PET_NAMES:
         return config, True

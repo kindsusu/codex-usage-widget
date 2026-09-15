@@ -66,7 +66,7 @@ def test_parses_five_hour_and_weekly_windows_by_duration() -> None:
     )
 
 
-def test_prefers_all_additional_limit_ids_over_legacy_rate_limits() -> None:
+def test_selects_only_core_codex_bucket_when_spark_is_first() -> None:
     # Given
     payload: JsonValue = {
         "rateLimits": {
@@ -78,20 +78,25 @@ def test_prefers_all_additional_limit_ids_over_legacy_rate_limits() -> None:
             },
         },
         "rateLimitsByLimitId": {
-            "codex": {
-                "limitName": "Codex",
+            "codex_bengalfox": {
+                "limitName": "GPT-5.3-Codex-Spark",
                 "primary": {
-                    "usedPercent": 10,
+                    "usedPercent": 80,
                     "windowDurationMins": 300,
                     "resetsAt": 1_784_246_400,
                 },
-            },
-            "codex_other": {
-                "limitName": "Other models",
                 "secondary": {
-                    "usedPercent": 20,
-                    "windowDurationMins": 1_440,
+                    "usedPercent": 70,
+                    "windowDurationMins": 10_080,
                     "resetsAt": 1_784_332_800,
+                },
+            },
+            "codex": {
+                "limitName": "Codex",
+                "primary": {
+                    "usedPercent": 56,
+                    "windowDurationMins": 10_080,
+                    "resetsAt": 1_784_246_400,
                 },
             },
         },
@@ -101,12 +106,109 @@ def test_prefers_all_additional_limit_ids_over_legacy_rate_limits() -> None:
     snapshot = parse_rate_limits(payload, FETCHED_AT)
 
     # Then
-    assert tuple(
-        (window.limit_id, window.limit_name) for window in snapshot.windows
-    ) == (
-        ("codex", "Codex"),
-        ("codex_other", "Other models"),
+    assert len(snapshot.windows) == 1
+    assert snapshot.windows[0].limit_id == "codex"
+    assert snapshot.windows[0].used_percent == 56
+    assert snapshot.windows[0].window_duration_mins == 10_080
+
+
+def test_selects_core_bucket_regardless_of_mapping_order() -> None:
+    # Given
+    payload: JsonValue = {
+        "rateLimitsByLimitId": {
+            "codex": {
+                "primary": {
+                    "usedPercent": 25,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_784_246_400,
+                },
+            },
+            "codex_bengalfox": {
+                "primary": {
+                    "usedPercent": 75,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_784_246_400,
+                },
+            },
+        }
+    }
+
+    # When
+    snapshot = parse_rate_limits(payload, FETCHED_AT)
+
+    # Then
+    assert tuple(window.used_percent for window in snapshot.windows) == (25.0,)
+
+
+def test_preserves_both_actual_windows_from_core_bucket() -> None:
+    # Given
+    payload: JsonValue = {
+        "rateLimitsByLimitId": {
+            "codex": {
+                "primary": {
+                    "usedPercent": 25,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_784_246_400,
+                },
+                "secondary": {
+                    "usedPercent": 18,
+                    "windowDurationMins": 10_080,
+                    "resetsAt": 1_784_332_800,
+                },
+            }
+        }
+    }
+
+    # When
+    snapshot = parse_rate_limits(payload, FETCHED_AT)
+
+    # Then
+    assert tuple(window.window_duration_mins for window in snapshot.windows) == (
+        300,
+        10_080,
     )
+
+
+def test_spark_only_mapping_does_not_masquerade_as_core_codex() -> None:
+    # Given
+    payload: JsonValue = {
+        "rateLimitsByLimitId": {
+            "codex_bengalfox": {
+                "limitName": "GPT-5.3-Codex-Spark",
+                "primary": {
+                    "usedPercent": 80,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_784_246_400,
+                },
+            }
+        }
+    }
+
+    # When
+    snapshot = parse_rate_limits(payload, FETCHED_AT)
+
+    # Then
+    assert snapshot.windows == ()
+
+
+def test_legacy_spark_bucket_does_not_masquerade_as_core_codex() -> None:
+    # Given
+    payload: JsonValue = {
+        "rateLimits": {
+            "limitId": "codex_bengalfox",
+            "primary": {
+                "usedPercent": 80,
+                "windowDurationMins": 300,
+                "resetsAt": 1_784_246_400,
+            },
+        }
+    }
+
+    # When
+    snapshot = parse_rate_limits(payload, FETCHED_AT)
+
+    # Then
+    assert snapshot.windows == ()
 
 
 def test_does_not_invent_rows_for_missing_windows() -> None:
@@ -333,7 +435,7 @@ def test_parses_real_legacy_nested_plan_type_when_root_plan_is_missing() -> None
     assert snapshot.plan_type == "plus"
 
 
-def test_plan_type_precedence_prefers_root_then_legacy_then_first_safe_bucket() -> None:
+def test_plan_type_precedence_prefers_root_then_legacy_then_core_bucket() -> None:
     # Given
     payloads: tuple[JsonValue, ...] = (
         {
@@ -350,8 +452,8 @@ def test_plan_type_precedence_prefers_root_then_legacy_then_first_safe_bucket() 
             "rateLimits": {"planType": "account-123"},
             "rateLimitsByLimitId": {
                 "first": {"planType": "private-team-name"},
-                "second": {"planType": "team"},
-                "third": {"planType": "pro"},
+                "second": {"planType": "pro"},
+                "codex": {"planType": "team"},
             },
         },
     )

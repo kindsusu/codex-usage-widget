@@ -16,6 +16,7 @@ _SAFE_PLAN_TYPES: Final = frozenset(
     {"plus", "pro", "team", "business", "enterprise", "free", "unknown"}
 )
 _PLAN_TYPE_MAX_LENGTH: Final = 16
+_CORE_LIMIT_ID: Final = "codex"
 
 
 @final
@@ -65,20 +66,20 @@ def _select_buckets(
     by_id_value = root.get("rateLimitsByLimitId")
     if by_id_value is not None:
         by_id = _expect_object(by_id_value, ("rateLimitsByLimitId",))
-        return tuple(
-            (
-                limit_id,
-                _expect_object(bucket, ("rateLimitsByLimitId", limit_id)),
-                ("rateLimitsByLimitId", limit_id),
-            )
-            for limit_id, bucket in by_id.items()
-        )
+        bucket = by_id.get(_CORE_LIMIT_ID)
+        if bucket is None:
+            return ()
+        path = ("rateLimitsByLimitId", _CORE_LIMIT_ID)
+        return ((_CORE_LIMIT_ID, _expect_object(bucket, path), path),)
 
     if "rateLimits" not in root:
         raise _error((), "rateLimits or rateLimitsByLimitId", dict(root))
     path = ("rateLimits",)
     bucket = _expect_object(root["rateLimits"], path)
-    return ((_parse_legacy_limit_id(bucket, path), bucket, path),)
+    limit_id = _parse_legacy_limit_id(bucket, path)
+    if limit_id != _CORE_LIMIT_ID:
+        return ()
+    return ((limit_id, bucket, path),)
 
 
 def _parse_legacy_limit_id(bucket: JsonObject, path: JsonPath) -> str:
