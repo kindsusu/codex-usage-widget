@@ -439,3 +439,52 @@ def should_yield_edge(
     if not tie_break_winner:
         return True
     return uptime > grace
+
+
+# ---- drag ghost (pure) -----------------------------------------------------
+# SHARED STRIP CONTRACT -- mirrored in the Claude widget.
+# Standard drag-and-drop feel: the strip stays put and dims, while a
+# click-through copy of its own bitmap follows the cursor across every
+# monitor. Both alphas are SourceConstantAlpha values for UpdateLayeredWindow.
+GHOST_ALPHA: Final = 153        # 60% -- the copy under the cursor
+DRAGGED_STRIP_ALPHA: Final = 90  # 35% -- the original, left behind
+OPAQUE_ALPHA: Final = 255
+
+
+class DragState(StrEnum):
+    """Pointer phases of a strip drag."""
+
+    IDLE = "idle"
+    PRESSED = "pressed"
+    DRAGGING = "dragging"
+
+
+def ghost_origin(
+    cursor: tuple[int, int],
+    press: tuple[int, int],
+    origin: Rect,
+) -> tuple[int, int]:
+    """Top-left of the ghost: the cursor minus where inside it was grabbed.
+
+    Deliberately unclamped -- the ghost may cross to any monitor, which is
+    exactly what tells the user a drop over there is possible.
+    """
+    return (
+        origin.left + cursor[0] - press[0],
+        origin.top + cursor[1] - press[1],
+    )
+
+
+def drag_state(
+    state: DragState, event: str, *, beyond_threshold: bool = False
+) -> DragState:
+    """Next pointer phase. One place so both widgets agree on click vs drag."""
+    if event in {"cancel", "release"}:
+        return DragState.IDLE
+    if event == "press":
+        return DragState.PRESSED
+    if event == "move":
+        if state is DragState.PRESSED and beyond_threshold:
+            return DragState.DRAGGING
+        return state
+    return state

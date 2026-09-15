@@ -3,6 +3,10 @@
 from codex_usage_widget.config import TaskbarHost, TaskbarZone, WidgetConfig
 from codex_usage_widget.actions import set_edge_priority, set_taskbar_placement
 from codex_usage_widget.taskbar_placement import (
+    DRAGGED_STRIP_ALPHA,
+    GHOST_ALPHA,
+    OPAQUE_ALPHA,
+    DragState,
     DropDecision,
     StartSlot,
     Rect,
@@ -11,7 +15,9 @@ from codex_usage_widget.taskbar_placement import (
     choose_host,
     clamp_to_host,
     decide_drop,
+    drag_state,
     edge_anchor,
+    ghost_origin,
     evicted_from_edge,
     place_taskbar_widget,
     second_slot_left,
@@ -271,3 +277,30 @@ def test_edge_priority_action_records_the_order() -> None:
     assert WidgetConfig().taskbar_edge_priority is True   # Codex default
     assert demoted.taskbar_edge_priority is False
     assert promoted.taskbar_edge_priority is True
+
+
+def test_ghost_follows_the_cursor_without_clamping() -> None:
+    origin = Rect(173, 1033, 334, 1079)
+
+    # grabbed 27px into the strip, dragged far onto the second monitor
+    assert ghost_origin((2500, 900), (200, 1056), origin) == (2473, 877)
+    # and to the left of the primary monitor: no clamping at all
+    assert ghost_origin((-300, 1056), (200, 1056), origin) == (-327, 1033)
+
+
+def test_drag_state_separates_a_click_from_a_drag() -> None:
+    pressed = drag_state(DragState.IDLE, "press")
+    assert pressed is DragState.PRESSED
+    # small wobble stays a click
+    assert drag_state(pressed, "move", beyond_threshold=False) is DragState.PRESSED
+    assert drag_state(pressed, "release") is DragState.IDLE
+    # past the threshold it becomes a drag and stays one until it ends
+    dragging = drag_state(pressed, "move", beyond_threshold=True)
+    assert dragging is DragState.DRAGGING
+    assert drag_state(dragging, "move", beyond_threshold=False) is DragState.DRAGGING
+    assert drag_state(dragging, "cancel") is DragState.IDLE
+    assert drag_state(dragging, "release") is DragState.IDLE
+
+
+def test_ghost_alphas_are_the_shared_contract() -> None:
+    assert (GHOST_ALPHA, DRAGGED_STRIP_ALPHA, OPAQUE_ALPHA) == (153, 90, 255)

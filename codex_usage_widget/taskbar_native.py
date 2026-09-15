@@ -28,21 +28,24 @@ from codex_usage_widget.config import TaskbarHost, TaskbarZone
 from codex_usage_widget.taskbar_model import TaskbarModel
 from codex_usage_widget.taskbar_placement import (
     CLAIM_YIELD_SCANS,
+    DRAGGED_STRIP_ALPHA,
     EDGE_EXPLICIT_SECONDS,
     EDGE_HOLD_SECONDS,
     EDGE_MARGIN,
     EDGE_TIE_BREAK_WINNER,
+    GHOST_ALPHA,
     LEADING_BAND,
+    OPAQUE_ALPHA,
     DropDecision,
     Rect,
     StartSlot,
     TaskbarGeometry,
     TaskbarHostCandidate,
     choose_host,
-    clamp_to_host,
     decide_drop,
     edge_anchor,
     evicted_from_edge,
+    ghost_origin,
     logical_pixels,
     place_taskbar_widget,
     second_slot_left,
@@ -59,6 +62,9 @@ WM_MOUSEMOVE: Final = 0x0200
 WM_MOUSELEAVE: Final = 0x02A3
 WM_LBUTTONDOWN: Final = 0x0201
 WM_CAPTURECHANGED: Final = 0x0215
+WM_TIMER: Final = 0x0113
+_DRAG_TIMER_ID: Final = 1
+_DRAG_TIMER_MS: Final = 50
 WM_APP_UPDATE: Final = 0x8001
 WM_APP_VISIBILITY: Final = 0x8002
 WM_APP_STOP: Final = 0x8003
@@ -69,6 +75,10 @@ WS_CLIPSIBLINGS: Final = 0x04000000
 WS_EX_LAYERED: Final = 0x00080000
 WS_EX_NOACTIVATE: Final = 0x08000000
 WS_EX_TOOLWINDOW: Final = 0x00000080
+WS_EX_TRANSPARENT: Final = 0x00000020
+WS_EX_TOPMOST: Final = 0x00000008
+HWND_TOPMOST: Final = -1
+GHOST_CLASS_NAME: Final = "CodexUsageTaskbarGhost"
 GWL_STYLE: Final = -16
 ULW_ALPHA: Final = 0x2
 SW_HIDE: Final = 0
@@ -79,6 +89,9 @@ SWP_FRAMECHANGED: Final = 0x0020
 SPI_GETHIGHCONTRAST: Final = 0x0042
 HCF_HIGHCONTRASTON: Final = 0x1
 _TIMER_MS: Final = 1_500
+SWP_NOSIZE: Final = 0x0001
+_ghost_wndproc: object | None = None
+_ghost_atom: int | None = None
 # Embedded usage strips (ours and the Claude widget's) register per-instance
 # class names, so siblings are recognized by prefix.
 SIBLING_CLASS_PREFIXES: Final = ("CodexUsageTaskbar", "ClaudeUsageTaskbarSurface")
@@ -379,6 +392,8 @@ class NativeTaskbarHost:
         self._claim_scans = 0
         # When a user drag last put this strip on the edge by hand.
         self._explicit_until = 0.0
+        self._ghost = 0
+        self._last_image: Image.Image | None = None
         self._press: tuple[int, int] | None = None
         self._press_rect: Rect | None = None
         self._dragging = False
@@ -583,6 +598,11 @@ class NativeTaskbarHost:
             return
         finally:
             stop_event.set()
+            # A drag in flight when the widget exits must not leave its ghost
+            # (and its DIB section) behind.
+            with self._lock:
+                ghost, self._ghost = self._ghost, 0
+            destroy_ghost_window(ghost)
             if hwnd and user32.IsWindow(hwnd):
                 user32.DestroyWindow(hwnd)
             if atom:
@@ -612,6 +632,13 @@ class NativeTaskbarHost:
             if self._handle_drag_move(hwnd):
                 return 0
             self._handle_mouse_move(hwnd, lparam)
+            return 0
+        if message == WM_TIMER and wparam == _DRAG_TIMER_ID:
+            # Esc reaches us through no window message (the strip never takes
+            # focus), so a small timer is what makes it work while the pointer
+            # stands still.
+            if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8001:
+                self._cancel_drag(hwnd)
             return 0
         if message == WM_CAPTURECHANGED:
             # Someone took the capture away: treat it as a cancelled drag.
@@ -685,7 +712,7 @@ class NativeTaskbarHost:
             dragging = self._dragging
         if press is None or rect is None:
             return False
-        if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8000:
+        if user32.GetAsyncKeyState(_VK_ESCAPE) & 0x8001:
             self._cancel_drag(hwnd)
             return True
         point = wintypes.POINT()
@@ -702,25 +729,37 @@ class NativeTaskbarHost:
             with self._lock:
                 self._dragging = True
                 self._suppress_menu_release = False
-        host = _window_rect(int(user32.GetParent(hwnd) or 0))
-        moved = Rect(
-            rect.left + point.x - press[0],
-            rect.top,
-            rect.right + point.x - press[0],
-            rect.bottom,
-        )
-        if host is not None:
-            moved = clamp_to_host(moved, host)
-        _ = user32.SetWindowPos(
-            hwnd,
-            None,
-            moved.left,
-            moved.top,
-            moved.width,
-            moved.height,
-            SWP_NOACTIVATE | SWP_NOZORDER,
-        )
+            self._start_ghost(hwnd)
+            _ = user32.SetTimer(hwnd, _DRAG_TIMER_ID, _DRAG_TIMER_MS, None)
+        # The strip itself never moves: the ghost carries the drag, so it can
+        # cross to another monitor while the original stays dimmed in place.
+        with self._lock:
+            ghost = self._ghost
+        if ghost:
+            left, top = ghost_origin((point.x, point.y), press, rect)
+            move_ghost_window(ghost, left, top)
         return True
+
+    def _start_ghost(self, hwnd: int) -> None:
+        """Raise the translucent copy and fade the strip that stays behind."""
+        with self._lock:
+            image = self._last_image
+        if image is None:
+            return
+        ghost = create_ghost_window(image)
+        with self._lock:
+            self._ghost = ghost
+        self._render_layered(hwnd, DRAGGED_STRIP_ALPHA)
+
+    def _end_ghost(self, hwnd: int) -> None:
+        """Drop the ghost, stop the Esc timer, restore full opacity."""
+        if hwnd:
+            _ = _user32().KillTimer(hwnd, _DRAG_TIMER_ID)
+        with self._lock:
+            ghost, self._ghost = self._ghost, 0
+        destroy_ghost_window(ghost)
+        if hwnd:
+            self._render_layered(hwnd)
 
     def _finish_drag(self, hwnd: int) -> bool:
         """Release a drag and report the drop. True when a drag was handled."""
@@ -734,6 +773,7 @@ class NativeTaskbarHost:
             return False                      # a synthetic release: nothing held
         user32 = _user32()
         _ = user32.ReleaseCapture()
+        self._end_ghost(hwnd)
         if not dragging:
             return False
         point = wintypes.POINT()
@@ -764,6 +804,8 @@ class NativeTaskbarHost:
             return
         user32 = _user32()
         _ = user32.ReleaseCapture()
+        # The strip never left its slot, so cancelling is just cleanup.
+        self._end_ghost(hwnd)
         _ = user32.PostMessageW(hwnd, WM_APP_LAYOUT, 0, 0)
 
     def _handle_mouse_move(self, hwnd: int, lparam: int) -> None:
@@ -943,7 +985,7 @@ class NativeTaskbarHost:
         if hwnd:
             _user32().ShowWindow(hwnd, SW_SHOWNOACTIVATE if show else SW_HIDE)
 
-    def _render_layered(self, hwnd: int) -> None:
+    def _render_layered(self, hwnd: int, alpha: int = OPAQUE_ALPHA) -> None:
         try:
             bounds = _RECT()
             if not _user32().GetClientRect(hwnd, ctypes.byref(bounds)):
@@ -964,7 +1006,9 @@ class NativeTaskbarHost:
                 light_theme=_system_uses_light_theme(),
                 high_contrast=_high_contrast(),
             )
-            update_layered_bitmap(hwnd, image)
+            update_layered_bitmap(hwnd, image, alpha)
+            with self._lock:
+                self._last_image = image
         except Exception:  # noqa: BLE001
             with self._lock:
                 self._attached = False
@@ -1026,8 +1070,92 @@ def _point_inside(x: int, y: int, region: HitRegion) -> bool:
     return region.left <= x < region.right and region.top <= y < region.bottom
 
 
-def update_layered_bitmap(hwnd: int, image: Image.Image) -> None:
-    """Publish one per-pixel-alpha frame and release every temporary GDI handle."""
+def create_ghost_window(image: Image.Image) -> int:
+    """A click-through, always-on-top copy of the strip that follows the drag.
+
+    SHARED STRIP CONTRACT -- same styles and alphas in the Claude widget.
+    WS_EX_TRANSPARENT keeps every click going to whatever is underneath, so
+    the drop still lands on the taskbar the cursor is over.
+    """
+    user32 = _user32()
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+    instance = kernel32.GetModuleHandleW(None)
+    global _ghost_wndproc, _ghost_atom  # noqa: PLW0603 -- one shared class
+    if _ghost_atom is None:
+
+        def ghost_proc(hwnd: int, message: int, wparam: int, lparam: int) -> int:
+            return int(user32.DefWindowProcW(hwnd, message, wparam, lparam))
+
+        _ghost_wndproc = WNDPROC(ghost_proc)
+        cls = _WNDCLASSW(
+            lpfnWndProc=_ghost_wndproc,
+            hInstance=instance,
+            lpszClassName=GHOST_CLASS_NAME,
+        )
+        _ghost_atom = int(user32.RegisterClassW(ctypes.byref(cls)) or 0)
+        if not _ghost_atom:
+            return 0
+    hwnd = int(
+        user32.CreateWindowExW(
+            WS_EX_LAYERED
+            | WS_EX_TRANSPARENT
+            | WS_EX_TOOLWINDOW
+            | WS_EX_NOACTIVATE
+            | WS_EX_TOPMOST,
+            GHOST_CLASS_NAME,
+            "",
+            WS_POPUP,
+            0,
+            0,
+            image.width,
+            image.height,
+            None,
+            None,
+            instance,
+            None,
+        )
+        or 0
+    )
+    if not hwnd:
+        return 0
+    update_layered_bitmap(hwnd, image, GHOST_ALPHA)
+    _ = user32.ShowWindow(hwnd, SW_SHOWNOACTIVATE)
+    return hwnd
+
+
+def move_ghost_window(hwnd: int, left: int, top: int) -> None:
+    """Park the ghost at a screen position, above everything, unclamped."""
+    _ = _user32().SetWindowPos(
+        hwnd,
+        ctypes.c_void_p(HWND_TOPMOST),
+        left,
+        top,
+        0,
+        0,
+        SWP_NOACTIVATE | SWP_NOSIZE,
+    )
+
+
+def destroy_ghost_window(hwnd: int) -> None:
+    """Tear the ghost down; safe to call twice and during shutdown."""
+    if not hwnd:
+        return
+    user32 = _user32()
+    with suppress(Exception):
+        if user32.IsWindow(hwnd):
+            _ = user32.DestroyWindow(hwnd)
+
+
+def update_layered_bitmap(
+    hwnd: int, image: Image.Image, alpha: int = OPAQUE_ALPHA
+) -> None:
+    """Publish one per-pixel-alpha frame and release every temporary GDI handle.
+
+    ``alpha`` is the whole-window SourceConstantAlpha on top of the per-pixel
+    channel, which is how a dragged strip dims and its ghost stays see-through.
+    """
     width, height = image.size
     if width <= 0 or height <= 0:
         return
@@ -1070,7 +1198,7 @@ def update_layered_bitmap(hwnd: int, image: Image.Image) -> None:
         _ = ctypes.memmove(bits, pixels, len(pixels))
         source = _POINT(0, 0)
         size = _SIZE(width, height)
-        blend = _BLENDFUNCTION(0, 0, 255, _AC_SRC_ALPHA)
+        blend = _BLENDFUNCTION(0, 0, alpha, _AC_SRC_ALPHA)
         if not user32.UpdateLayeredWindow(
             hwnd,
             screen_dc,
@@ -1521,3 +1649,12 @@ def _configure_user32(library: ctypes.WinDLL) -> None:  # noqa: PLR0915
     library.ReleaseCapture.restype = wintypes.BOOL
     library.GetSystemMetrics.argtypes = [ctypes.c_int]
     library.GetSystemMetrics.restype = ctypes.c_int
+    library.SetTimer.argtypes = [
+        wintypes.HWND,
+        ctypes.c_size_t,
+        wintypes.UINT,
+        ctypes.c_void_p,
+    ]
+    library.SetTimer.restype = ctypes.c_size_t
+    library.KillTimer.argtypes = [wintypes.HWND, ctypes.c_size_t]
+    library.KillTimer.restype = wintypes.BOOL
