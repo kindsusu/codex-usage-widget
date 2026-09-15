@@ -10,7 +10,7 @@ packages = ["codex_usage_widget"]
 
 [project]
 name = "codex-usage-widget"
-version = "0.4.0"
+version = "2.0.1"
 description = "A compact Windows desktop widget for Codex rate-limit usage"
 readme = "README.md"
 requires-python = ">=3.11"
