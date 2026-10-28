@@ -118,10 +118,19 @@ def foreground_process_from_records(
     if foreground is None:
         return ForegroundProcess(name=None, related_process_names=())
     descendants: list[str] = []
+    # Windows keeps stale parent PIDs and reuses PIDs, so the table can hold
+    # cycles (two chrome.exe as each other's parent, 2026-10-28); without
+    # `seen` this walk never ends and the descendant list eats all memory.
+    seen = {foreground_pid}
     pending = [foreground_pid]
     while pending:
         parent_pid = pending.pop()
-        children = tuple(row for row in records if row.parent_pid == parent_pid)
+        children = tuple(
+            row
+            for row in records
+            if row.parent_pid == parent_pid and row.pid not in seen
+        )
+        seen.update(child.pid for child in children)
         descendants.extend(child.name for child in children)
         pending.extend(child.pid for child in children)
     return ForegroundProcess(

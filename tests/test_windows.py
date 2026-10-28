@@ -176,6 +176,24 @@ def test_foreground_context_includes_only_descendants_of_the_terminal() -> None:
     )
 
 
+def test_foreground_context_survives_parent_pid_cycles() -> None:
+    # Given: PID reuse left two processes as each other's parent
+    records = (
+        ProcessRecord(pid=0, parent_pid=0, name="[System Process]"),
+        ProcessRecord(pid=3804, parent_pid=23040, name="chrome.exe"),
+        ProcessRecord(pid=23040, parent_pid=3804, name="chrome.exe"),
+    )
+
+    # When
+    context = foreground_process_from_records(3804, records)
+
+    # Then
+    assert context == ForegroundProcess(
+        name="chrome.exe",
+        related_process_names=("chrome.exe",),
+    )
+
+
 def test_claude_names_are_never_classified_as_codex() -> None:
     # Given
     claude_names = ("claude.exe", "Claude Desktop.exe", "claude-code.exe")

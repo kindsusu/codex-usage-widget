@@ -235,3 +235,10 @@ zip 항목 이름은 `is_managed_member`로 걸러 낸다 — 절대 경로·드
 `choose_host`는 저장된 `taskbar_host`가 `secondary`인데 그 모니터가 없으면 주 작업표시줄 후보를 `fallback=True`로 반환하되, 호출자는 이 결과를 `WidgetConfig`에 절대 되쓰지 않는다. 13번 항목에서 확정한 "실측이 곧 규칙"과 같은 축의 원칙이다 — 일시적으로 관측된 화면 상태(모니터 분리)를 영구 설정에 반영하면, 모니터가 돌아왔을 때 사용자가 원래 고른 자리로 자동 복귀할 방법이 없어진다. 트레이 상태 문구("선택한 작업표시줄 없음 · 주 작업표시줄 사용 중")로만 알리고 설정은 그대로 둔다.
 
 자매 클로드 위젯도 `_tb_choose_host`/`_tb_decide_drop`/`_tb_place_widget`로 동일 계약을 이식했다(`SHARED STRIP CONTRACT`).
+
+## 15. 포그라운드 프로세스 트리 순환 — 시작 시 무한 루프 (2026-10-28)
+
+- 증상: 부팅 후 스트립이 "불러오는 중"에서 멈춤. 자식 pythonw가 CPU 1코어 100%, 메모리 수 GB로 계속 증가.
+- 원인: `foreground_process_from_records`가 포그라운드 앱의 자손을 방문 기록 없이 탐색. Windows는 parent PID를 갱신하지 않고 PID를 재사용하므로 프로세스 표에 순환이 생긴다(실측: `chrome.exe` 두 개가 서로의 부모). 시작 중 `topmost.apply`에서 걸려 mainloop에 들어가지 못했다.
+- 수정: `seen` 집합으로 방문한 PID를 건너뜀(클로드 위젯 `claude_runs_under`와 같은 방식). 회귀 테스트 `test_foreground_context_survives_parent_pid_cycles`(옛 코드는 멈춤).
+- 진단 팁: 파이썬 3.14 `sys.remote_exec(pid, script)`로 실행 중 위젯에 스택 덤프 스크립트를 넣으면 콘솔 없는 pythonw도 어디서 도는지 바로 보인다.
